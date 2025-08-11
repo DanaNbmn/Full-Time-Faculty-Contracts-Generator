@@ -53,6 +53,7 @@ BENEFITS = {
 
 # ========= 3) HELPERS =========
 def campus_key(campus: str) -> str:
+    # Dubai follows Abu Dhabi rules
     return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
 
 def fmt_amt(n: int) -> str:
@@ -66,13 +67,14 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
     housing = R["housing_allowance_k"][ckey][marital] * 1000
     furniture = R["furniture_allowance_k_once"][ckey][marital] * 1000
 
-    joining_line = R["joining_ticket_international"] if is_international else "Not applicable for local hires"
-    # Education allowance: if your policy uses different per-child vs family-cap numbers, change here.
+    # FIX: Commencement ticket only for international hires; others always apply
+    joining_value = R["joining_ticket_international"] if is_international else ""
+
     edu_per_child = S["children_school_allowance"][ckey]
     edu_total = S["children_school_allowance"][ckey]
 
     return {
-        "JOINING_TICKET": joining_line,
+        "JOINING_TICKET": joining_value,                     # "" for locals
         "HOUSING_ALLOWANCE": fmt_amt(housing),
         "FURNITURE_ALLOWANCE": fmt_amt(furniture),
         "EDUCATION_ALLOWANCE_PER_CHILD": fmt_amt(edu_per_child),
@@ -80,23 +82,22 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
         "TUITION_EMPLOYEE": S["tuition_waiver"]["employee"],
         "TUITION_DEPENDENT": S["tuition_waiver"]["dependent"],
         "TUITION_IMMEDIATE": S["tuition_waiver"]["immediate_family"],
-        "ANNUAL_TICKET": S["annual_ticket"],
         "RELOCATION_ALLOWANCE": fmt_amt(R["relocation_allowance"]),
         "REPARIATION_ALLOWANCE": fmt_amt(R["repatriation_allowance"]),
-        "REPATRIATION_TICKET": S["repatriation_ticket"],
-        "HEALTH_INSURANCE": S["health_insurance"],
+        "REPATRIATION_TICKET": S["repatriation_ticket"],     # always applies
+        "HEALTH_INSURANCE": S["health_insurance"],           # always applies
         "ANNUAL_LEAVE_DAYS": R["annual_leave_days"],
-        "CAMPUS": "Abu Dhabi/Dubai" if ckey == "AD/Dubai" else "Al Ain",
+        # NOTE: Do NOT override {{CAMPUS}} here to avoid duplication
     }
 
 def replace_placeholders(doc: Document, mapping: dict):
+    # Replace text in paragraphs and tables; rebuild runs to avoid partial leftovers
     def replace_in_paragraph(par):
         text = par.text
         for k, v in mapping.items():
             token = f"{{{{{k}}}}}"
             if token in text:
                 text = text.replace(token, str(v))
-        # rebuild runs to avoid partial formatting artifacts
         for _ in range(len(par.runs)):
             par.runs[0].text = ""
             del par.runs[0]
@@ -134,13 +135,14 @@ with st.form("offer_form", clear_on_submit=False):
         position = st.text_input("Position Title", placeholder="Assistant Professor in ...")
         department = st.text_input("College/Department Name", placeholder="College/Department")
         reporting_manager = st.text_input("Reporting Manager’s Title", placeholder="Dean/Chair of ...")
-        campus = st.selectbox("Campus", ["Abu Dhabi", "Al Ain"], index=0)
+        campus = st.selectbox("Campus", ["Abu Dhabi", "Dubai", "Al Ain"], index=0)  # Dubai added
         salary = st.number_input("Total Monthly Compensation (AED)", min_value=0, step=500, value=0)
 
     st.subheader("Contract Settings")
     c3, c4, c5, c6 = st.columns(4)
     with c3:
-        rank = st.selectbox("Rank", list(BENEFITS.keys() - {"_shared"}), index=2)  # default Assistant / Lecturer
+        ranks = [k for k in BENEFITS.keys() if k != "_shared"]
+        rank = st.selectbox("Rank", ranks, index=ranks.index("Assistant / Lecturer") if "Assistant / Lecturer" in ranks else 0)
     with c4:
         marital_status = st.selectbox("Marital Status", ["Single", "Married"], index=0)
     with c5:
@@ -154,7 +156,7 @@ with st.form("offer_form", clear_on_submit=False):
     submit = st.form_submit_button("Generate Offer Letter")
 
 if submit:
-    # Build base placeholders
+    # Base placeholders (single source of truth; avoids duplication)
     today = datetime.now().strftime(DATE_FORMAT)
     base_map = {
         "ID": candidate_id,
@@ -166,12 +168,12 @@ if submit:
         "POSITION": position,
         "DEPARTMENT": department,
         "REPORTING_MANAGER": reporting_manager,
-        "CAMPUS": campus,  # Also overridden in benefits mapping as label if needed
+        "CAMPUS": campus,  # kept only here
         "SALARY": f"{int(salary):,}" if salary else "",
         "PROBATION": probation,
     }
 
-    # Compute benefits mapping
+    # Benefits mapping with your corrections
     benefits_map = compute_benefits_mapping(
         rank=rank,
         marital=marital_status,
@@ -179,7 +181,7 @@ if submit:
         is_international=(hire_type == "International"),
     )
 
-    # Merge and validate
+    # Merge + validate
     mapping = {**base_map, **benefits_map}
     required = ["ID", "CANDIDATE_NAME", "PERSONAL_EMAIL", "POSITION", "DEPARTMENT", "REPORTING_MANAGER", "SALARY"]
     missing = [k for k in required if not mapping.get(k)]
@@ -193,7 +195,7 @@ if submit:
         st.download_button(
             "⬇️ Download Offer Letter (DOCX)",
             data=docx_bytes,
-            file_name=f"Offer_{candidate_name.replace(' ', '_') or 'Candidate'}.docx",
+            file_name=f"Offer_{(candidate_name or 'Candidate').replace(' ', '_')}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         st.info(f"Applied rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
