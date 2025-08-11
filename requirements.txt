@@ -1,4 +1,2 @@
-st
-Document
-BytesIO
-datetime
+streamlit
+python-docx
