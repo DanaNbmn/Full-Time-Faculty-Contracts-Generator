@@ -114,7 +114,7 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
             pass
 
         section.header_distance = Inches(0.5)
-        section.footer_distance = Inches(0.5)
+        section.footer_distance = Inches(0.0)
 
         # ----- Header -----
         header = section.header
@@ -364,5 +364,6 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
 
 
