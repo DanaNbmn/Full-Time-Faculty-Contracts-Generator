@@ -4,7 +4,6 @@ from docx import Document
 from io import BytesIO
 from datetime import datetime
 from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
 st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
 
@@ -12,42 +11,35 @@ st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄"
 DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders.docx"
 DATE_FORMAT = "%d %B %Y"  # e.g., 11 August 2025
 
-# ========= 2) BENEFITS RULES (from your table) — ONLY the 7 outputs you want =========
+# ========= 2) BENEFITS RULES — only the 7 outputs you want =========
 BENEFITS = {
-    "_shared": {
-        "children_school_allowance": {"AD/Dubai": 60000, "AA": 50000},
-    },
+    "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Associate / Sr. Lecturer": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Assistant / Lecturer": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Senior Instructor": {
-        "annual_leave_days": 42,
-        "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 42, "joining_ticket_international": "1+1+2 Economy",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
     },
     "Instructor": {
-        "annual_leave_days": 42,
-        "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 42, "joining_ticket_international": "1+1+2 Economy",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
@@ -56,22 +48,17 @@ BENEFITS = {
 
 # ========= 3) HELPERS =========
 def campus_key(campus: str) -> str:
-    # Dubai follows Abu Dhabi rules
     return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
 
 def fmt_amt(n: int) -> str:
     return f"{int(n):,}"
 
 def compute_benefits_mapping(rank: str, marital: str, campus: str, is_international: bool):
-    R = BENEFITS[rank]
-    S = BENEFITS["_shared"]
-    ckey = campus_key(campus)
-
+    R = BENEFITS[rank]; S = BENEFITS["_shared"]; ckey = campus_key(campus)
     housing = R["housing_allowance_k"][ckey][marital] * 1000
     furniture = R["furniture_allowance_k_once"][ckey][marital] * 1000
     edu = S["children_school_allowance"][ckey]
     joining_value = R["joining_ticket_international"] if is_international else ""
-
     return {
         "HOUSING_ALLOWANCE": fmt_amt(housing),
         "FURNITURE_ALLOWANCE": fmt_amt(furniture),
@@ -82,54 +69,44 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
         "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
     }
 
-def replace_placeholders_in_text(text: str, mapping: dict) -> str:
-    for k, v in mapping.items():
-        token = f"{{{{{k}}}}}"
-        if token in text:
-            text = text.replace(token, str(v))
-    return text
-
-def set_paragraph_text(par, new_text: str):
+def _set_paragraph_text(par, new_text: str):
     for _ in range(len(par.runs)):
         par.runs[0].text = ""
         del par.runs[0]
     par.add_run(new_text)
 
-def insert_paragraph_after(paragraph, text):
+def _replace_in_text(text: str, mapping: dict) -> str:
+    for k, v in mapping.items():
+        text = text.replace(f"{{{{{k}}}}}", str(v))
+    return text
+
+def _insert_paragraph_after(paragraph, text):
     new_p = OxmlElement("w:p")
     paragraph._p.addnext(new_p)
     p = paragraph._parent.add_paragraph()
     p._p = new_p
-    set_paragraph_text(p, text)
+    _set_paragraph_text(p, text)
     return p
 
+# ---------- Benefits section: rebuild fully (prevents duplicates) ----------
 def rebuild_benefits_section(doc: Document, mapping: dict):
-    """
-    Find '3. Benefits' and replace the WHOLE section (until the next '4.' heading)
-    with a single, clean block composed from the 7 mapped values.
-    This permanently eliminates duplicates from the template.
-    """
-    # Find start and end
     start_idx = end_idx = None
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
         if t.startswith("3. Benefits"):
             start_idx = i
         elif start_idx is not None and t.startswith("4."):
-            end_idx = i
-            break
+            end_idx = i; break
     if start_idx is None:
-        return  # nothing to do
-
+        return
     if end_idx is None:
         end_idx = len(doc.paragraphs)
 
-    # Remove everything AFTER the "3. Benefits" line up to (but not including) end_idx
+    # Remove everything after "3. Benefits" up to the next heading
     for i in range(end_idx - 1, start_idx, -1):
-        p = doc.paragraphs[i]
-        p._element.getparent().remove(p._element)
+        doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
 
-    # Compose the clean block
+    # Compose clean lines with your 7 values
     lines = [
         f"Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {mapping['HOUSING_ALLOWANCE']} per year (paid monthly) will be provided based on eligibility.",
         f"Furniture Allowance: AED {mapping['FURNITURE_ALLOWANCE']} provided at the commencement of employment as a forgivable loan amortized over three (3) years. Should you leave ADU before completing three years of service, the amount will be repayable on a pro-rata basis.",
@@ -146,54 +123,61 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
         "ADU Tuition Waiver: 75% deduction on tuition fees for self, 50% for dependents and 25% for immediate family in accordance with ADU Policy. (applicable upon completion of one year of service with ADU)",
     ])
 
-    # Insert the new lines right after "3. Benefits"
     anchor = doc.paragraphs[start_idx]
-    # Clear any text after replacement (keep the header)
-    set_paragraph_text(anchor, "3. Benefits")
+    _set_paragraph_text(anchor, "3. Benefits")
     last = anchor
     for line in lines:
-        last = insert_paragraph_after(last, line)
+        last = _insert_paragraph_after(last, line)
 
-def cleanup_global_duplicates(doc: Document):
-    """
-    If the intro or probation lines appear twice (in separate paragraphs),
-    keep the LAST one across the whole document.
-    """
-    starts = [
-        "Abu Dhabi University (ADU) is pleased",
-        "Probation Period:",
-        "Notice Period:",
-    ]
-    last_seen = {s: -1 for s in starts}
+# ---------- Cleanup: remove raw-value-only lines & global duplicates ----------
+RAW_VALUE_KEYS = [
+    "SALUTATION", "CANDIDATE_NAME", "TELEPHONE", "PERSONAL_EMAIL",
+    "ID", "DATE", "POSITION", "DEPARTMENT", "CAMPUS", "REPORTING_MANAGER",
+    "SALARY", "PROBATION",
+]
+
+KEEP_LAST_STARTS = [
+    "Abu Dhabi University (ADU) is pleased",
+    "Your first day of employment",
+    "Probation Period:",
+    "Notice Period:",
+]
+
+def cleanup_after_replacement(doc: Document, mapping: dict):
+    # 1) Remove paragraphs that are ONLY a raw value (e.g., "Dr. Dana")
+    raw_values = {str(mapping[k]).strip() for k in RAW_VALUE_KEYS if mapping.get(k) not in (None, "")}
+    for p in list(doc.paragraphs):
+        txt = p.text.strip()
+        if txt in raw_values:
+            p._element.getparent().remove(p._element)
+
+    # 2) Keep only the LAST occurrence of key policy lines (intro, probation, notice)
+    last_idx = {}
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
-        for s in starts:
+        for s in KEEP_LAST_STARTS:
             if t.startswith(s):
-                last_seen[s] = i
-
-    for s, keep_idx in last_seen.items():
-        if keep_idx == -1:
-            continue
-        # delete earlier duplicates
+                last_idx[s] = i
+    for s, keep in last_idx.items():
         for i, p in enumerate(list(doc.paragraphs)):
-            if i < keep_idx and p.text.strip().startswith(s):
+            if i < keep and p.text.strip().startswith(s):
                 p._element.getparent().remove(p._element)
 
 def replace_placeholders(doc: Document, mapping: dict):
-    # 1) Replace direct placeholders everywhere
+    # Replace placeholders everywhere
     for p in doc.paragraphs:
-        set_paragraph_text(p, replace_placeholders_in_text(p.text, mapping))
+        _set_paragraph_text(p, _replace_in_text(p.text, mapping))
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    set_paragraph_text(p, replace_placeholders_in_text(p.text, mapping))
+                    _set_paragraph_text(p, _replace_in_text(p.text, mapping))
 
-    # 2) Rebuild Benefits section from scratch (eliminates any template duplicates)
+    # Rebuild benefits to remove any template duplicates
     rebuild_benefits_section(doc, mapping)
 
-    # 3) Remove global duplicates for intro/probation/notice if they exist as separate paras
-    cleanup_global_duplicates(doc)
+    # Remove raw-value-only lines (the green lines in your screenshot) & dedupe intro/probation/notice
+    cleanup_after_replacement(doc, mapping)
 
 def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
     doc = Document(BytesIO(template_bytes)) if template_bytes else Document(DEFAULT_TEMPLATE_PATH)
@@ -241,7 +225,6 @@ with st.form("offer_form", clear_on_submit=False):
 if submit:
     today = datetime.now().strftime(DATE_FORMAT)
 
-    # DIRECT INPUTS (your exact list)
     base_map = {
         "ID": candidate_id,
         "DATE": today,
@@ -257,11 +240,8 @@ if submit:
         "PROBATION": probation,
     }
 
-    # ONLY the 7 benefits fields
     benefits_map = compute_benefits_mapping(
-        rank=rank,
-        marital=marital_status,
-        campus=campus,
+        rank=rank, marital=marital_status, campus=campus,
         is_international=(hire_type == "International"),
     )
 
