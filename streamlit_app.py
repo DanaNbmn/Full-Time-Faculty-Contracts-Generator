@@ -1,4 +1,4 @@
-# app.py
+# app.py (safe deletes; no index errors)
 import re
 import streamlit as st
 from docx import Document
@@ -91,8 +91,11 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
         elif start is not None and t.startswith("4."): end = i; break
     if start is None: return
     if end is None: end = len(doc.paragraphs)
-    for i in range(end - 1, start, -1):
-        doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
+
+    # collect elements to remove by reference
+    to_remove = [doc.paragraphs[i]._element for i in range(start+1, end)]
+    for el in to_remove:
+        el.getparent().remove(el)
 
     lines = [
         f"Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {mapping['HOUSING_ALLOWANCE']} per year (paid monthly) will be provided based on eligibility.",
@@ -113,106 +116,86 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
     last = anchor
     for line in lines: last = _insert_paragraph_after(last, line)
 
-# ---------- NEW: normalize header/intro & core policy lines ----------
+# ---------- normalize header/intro ----------
 def normalize_header_and_intro(doc: Document, m: dict):
-    """
-    Force a single, clean version of:
-      Ref:, Date:, Tel No:, Email ID:, Dear ..., intro sentence, salary header.
-    Removes any 'SALUTATION NAME' standalone line.
-    """
-    labels = [
-        ("Ref:", f"Ref: {m.get('ID','')}"),
-        ("Date:", f"Date: {m.get('DATE','')}"),
-        ("Tel No:", f"Tel No: {m.get('TELEPHONE','')}"),
-        ("Email ID:", f"Email ID: {m.get('PERSONAL_EMAIL','')}"),
-    ]
-    # helper: keep last occurrence, set exact text, drop others
-    def keep_last(label, final_text):
-        idxs = [i for i, p in enumerate(doc.paragraphs) if label in p.text]
-        if not idxs: return
-        keep = idxs[-1]
-        for i in idxs[:-1]:
-            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
-        _set_paragraph_text(doc.paragraphs[keep], final_text)
+    # keep last label and set exact text; remove others by element ref
+    def keep_last_by_label(label_text: str, final_text: str):
+        hits = [p for p in doc.paragraphs if label_text in p.text]
+        if not hits: return
+        keep = hits[-1]
+        for p in hits[:-1]:
+            p._element.getparent().remove(p._element)
+        _set_paragraph_text(keep, final_text)
 
-    for label, final_text in labels:
-        keep_last(label, final_text)
+    keep_last_by_label("Ref:", f"Ref: {m.get('ID','')}")
+    keep_last_by_label("Date:", f"Date: {m.get('DATE','')}")
+    keep_last_by_label("Tel No:", f"Tel No: {m.get('TELEPHONE','')}")
+    keep_last_by_label("Email ID:", f"Email ID: {m.get('PERSONAL_EMAIL','')}")
 
-    # Remove standalone "Salutation Name" line (e.g., "Dr. Dana" or with comma)
+    # Remove standalone "Salutation Name" line
     sal = (m.get("SALUTATION","") + " " + m.get("CANDIDATE_NAME","")).strip()
     for p in list(doc.paragraphs):
         t = p.text.strip()
-        if t == sal or t == sal + ",":
+        if t in (sal, sal + ","):
             p._element.getparent().remove(p._element)
 
-    # Ensure single clean "Dear ..." line (keep last)
+    # Ensure single clean "Dear ..." line
     dear = f"Dear {sal},"
-    dear_idxs = [i for i, p in enumerate(doc.paragraphs) if p.text.strip().startswith("Dear")]
-    if dear_idxs:
-        keep = dear_idxs[-1]
-        for i in dear_idxs[:-1]:
-            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
-        _set_paragraph_text(doc.paragraphs[keep], dear)
+    hits = [p for p in doc.paragraphs if p.text.strip().startswith("Dear")]
+    if hits:
+        for p in hits[:-1]:
+            p._element.getparent().remove(p._element)
+        _set_paragraph_text(hits[-1], dear)
 
-    # Intro paragraph (keep ONE, set exact text)
+    # Intro sentence
     intro = ("Abu Dhabi University (ADU) is pleased to offer you a contract of employment "
              f"for the position of {m.get('POSITION','')} in the {m.get('DEPARTMENT','')} "
              f"based in {m.get('CAMPUS','')}, UAE. This position reports to the "
              f"{m.get('REPORTING_MANAGER','')}.")
-    intro_idxs = [i for i, p in enumerate(doc.paragraphs) if "Abu Dhabi University (ADU) is pleased" in p.text]
-    if intro_idxs:
-        keep = intro_idxs[-1]
-        for i in intro_idxs[:-1]:
-            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
-        _set_paragraph_text(doc.paragraphs[keep], intro)
+    hits = [p for p in doc.paragraphs if "Abu Dhabi University (ADU) is pleased" in p.text]
+    if hits:
+        for p in hits[:-1]:
+            p._element.getparent().remove(p._element)
+        _set_paragraph_text(hits[-1], intro)
 
-    # Salary header line (keep one and format)
-    salary_idxs = [i for i, p in enumerate(doc.paragraphs) if "Your total monthly compensation" in p.text]
-    if salary_idxs:
-        keep = salary_idxs[-1]
-        for i in salary_idxs[:-1]:
-            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
-        _set_paragraph_text(doc.paragraphs[keep],
-                            f"Your total monthly compensation will be AED {m.get('SALARY','')}, comprising:")
+    # Salary header
+    hits = [p for p in doc.paragraphs if "Your total monthly compensation" in p.text]
+    if hits:
+        for p in hits[:-1]:
+            p._element.getparent().remove(p._element)
+        _set_paragraph_text(hits[-1], f"Your total monthly compensation will be AED {m.get('SALARY','')}, comprising:")
 
+# ---------- policy duplicates ----------
 def normalize_policy_duplicates(doc: Document):
-    # Keep only the LAST occurrence across doc (paragraph-level)
-    starts = [
-        "Your first day of employment",
-        "Probation Period:",
-        "Notice Period:",
-    ]
-    last = {}
-    for i, p in enumerate(doc.paragraphs):
+    starts = ["Your first day of employment", "Probation Period:", "Notice Period:"]
+    # find last paragraph object for each start
+    last_par = {}
+    for p in doc.paragraphs:
         t = p.text.strip()
         for s in starts:
-            if t.startswith(s): last[s] = i
-    for s, keep in last.items():
-        for i, p in enumerate(list(doc.paragraphs)):
-            if i < keep and p.text.strip().startswith(s):
+            if t.startswith(s): last_par[s] = p
+    # remove earlier hits by element ref
+    for s, keep_par in last_par.items():
+        for p in list(doc.paragraphs):
+            if p is keep_par: continue
+            if p.text.strip().startswith(s):
                 p._element.getparent().remove(p._element)
 
 def replace_placeholders(doc: Document, mapping: dict):
-    # 1) Replace tokens everywhere (tolerant of run breaks / single braces)
+    # 1) Replace tokens (tolerant) and strip leftovers
     for p in doc.paragraphs:
-        _set_paragraph_text(p, _token_replace(p.text, mapping))
+        _set_paragraph_text(p, _strip_leftover_tokens(_token_replace(p.text, mapping)))
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    _set_paragraph_text(p, _token_replace(p.text, mapping))
+                    _set_paragraph_text(p, _strip_leftover_tokens(_token_replace(p.text, mapping)))
 
-    # 2) Strip any leftover tokens inline (don’t drop the paragraph)
-    for p in doc.paragraphs:
-        clean = _strip_leftover_tokens(p.text)
-        if clean != p.text:
-            _set_paragraph_text(p, clean)
-
-    # 3) Normalize header/intro & salary line, then core policy duplicates
+    # 2) Normalize header/intro & policy duplicates
     normalize_header_and_intro(doc, mapping)
     normalize_policy_duplicates(doc)
 
-    # 4) Rebuild Benefits cleanly
+    # 3) Rebuild Benefits cleanly
     rebuild_benefits_section(doc, mapping)
 
 def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
