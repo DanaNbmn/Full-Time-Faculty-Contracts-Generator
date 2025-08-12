@@ -1,69 +1,95 @@
+# app.py
 import streamlit as st
 from docx import Document
 from io import BytesIO
-import datetime
+from datetime import datetime
 
-# -------------------------
-# Benefits Mapping Function
-# -------------------------
-def compute_benefits_mapping(employment_category, marital_status, campus):
-    # Treat Dubai as Abu Dhabi
-    campus_key = campus
-    if campus.lower() == "dubai":
-        campus_key = "abu dhabi"
+st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
 
-    # Example benefits table dictionary
-    benefits_data = {
-        ("assistant professor", "single", "abu dhabi"): {
-            "HOUSING_ALLOWANCE": 45000,
-            "FURNITURE_ALLOWANCE": 15000,
-            "JOINING_TICKET": "1+1+2 Economy",
-            "RELOCATION_ALLOWANCE": 3000,
-            "REPATRIATION_TICKET": "1+1+2 Economy",
-            "REPARIATION_ALLOWANCE": 2000,
-            "HEALTH_INSURANCE": "1+1+3",
-            "ANNUAL_LEAVE_DAYS": 42,
-            "EDUCATION_ALLOWANCE_PER_CHILD": 30000,
-            "EDUCATION_ALLOWANCE_TOTAL": 60000,
-            "TUITION_EMPLOYEE": 75,
-            "TUITION_DEPENDENT": 50,
-            "TUITION_IMMEDIATE": 25
-        },
-        # Add other category/marital/campus combinations here
+# ========= 1) CONFIG =========
+DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_BenefitsBlock.docx"
+DATE_FORMAT = "%d %B %Y"  # e.g., 11 August 2025
+
+# ========= 2) BENEFITS RULES (your table) =========
+BENEFITS = {
+    "_shared": {
+        "children_school_allowance": {"AD/Dubai": 60000, "AA": 50000},
+        "tuition_waiver": {"employee": 75, "dependent": 50, "immediate_family": 25},
+        "annual_ticket": "1+1+2 Economy",
+        "repatriation_ticket": "1+1+2 Economy",
+        "health_insurance": "1+1+3",
+    },
+    "Professor": {
+        "annual_leave_days": 56, "relocation_allowance": 3000, "repatriation_allowance": 3000,
+        "joining_ticket_international": "1+1+2 Economy",
+        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
+        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
+    },
+    "Associate / Sr. Lecturer": {
+        "annual_leave_days": 56, "relocation_allowance": 3000, "repatriation_allowance": 3000,
+        "joining_ticket_international": "1+1+2 Economy",
+        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
+        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
+    },
+    "Assistant / Lecturer": {
+        "annual_leave_days": 56, "relocation_allowance": 3000, "repatriation_allowance": 3000,
+        "joining_ticket_international": "1+1+2 Economy",
+        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
+        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
+    },
+    "Senior Instructor": {
+        "annual_leave_days": 42, "relocation_allowance": 3000, "repatriation_allowance": 2000,
+        "joining_ticket_international": "1+1+2 Economy",
+        "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
+        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
+    },
+    "Instructor": {
+        "annual_leave_days": 42, "relocation_allowance": 3000, "repatriation_allowance": 2000,
+        "joining_ticket_international": "1+1+2 Economy",
+        "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
+        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
+    },
+}
+
+# ========= 3) HELPERS =========
+def campus_key(campus: str) -> str:
+    # Dubai follows Abu Dhabi rules
+    return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
+
+def fmt_amt(n: int) -> str:
+    return f"{int(n):,}"
+
+def compute_benefits_mapping(rank: str, marital: str, campus: str, is_international: bool):
+    R = BENEFITS[rank]
+    S = BENEFITS["_shared"]
+    ckey = campus_key(campus)
+
+    housing = R["housing_allowance_k"][ckey][marital] * 1000
+    furniture = R["furniture_allowance_k_once"][ckey][marital] * 1000
+
+    # Commencement (joining) ticket only for international hires
+    joining_value = R["joining_ticket_international"] if is_international else ""
+
+    edu_per_child = S["children_school_allowance"][ckey]
+    edu_total = S["children_school_allowance"][ckey]
+
+    return {
+        "JOINING_TICKET": joining_value,
+        "HOUSING_ALLOWANCE": fmt_amt(housing),
+        "FURNITURE_ALLOWANCE": fmt_amt(furniture),
+        "EDUCATION_ALLOWANCE_PER_CHILD": fmt_amt(edu_per_child),
+        "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu_total),
+        "TUITION_EMPLOYEE": S["tuition_waiver"]["employee"],
+        "TUITION_DEPENDENT": S["tuition_waiver"]["dependent"],
+        "TUITION_IMMEDIATE": S["tuition_waiver"]["immediate_family"],
+        "RELOCATION_ALLOWANCE": fmt_amt(R["relocation_allowance"]),
+        "REPARIATION_ALLOWANCE": fmt_amt(R["repatriation_allowance"]),
+        "REPATRIATION_TICKET": S["repatriation_ticket"],   # always applies
+        "HEALTH_INSURANCE": S["health_insurance"],         # always applies
+        "ANNUAL_LEAVE_DAYS": R["annual_leave_days"],
     }
 
-    # Default mapping if not found
-    mapping = benefits_data.get(
-        (employment_category.lower(), marital_status.lower(), campus_key.lower()),
-        {
-            "HOUSING_ALLOWANCE": "N/A",
-            "FURNITURE_ALLOWANCE": "N/A",
-            "JOINING_TICKET": "",
-            "RELOCATION_ALLOWANCE": "N/A",
-            "REPATRIATION_TICKET": "1+1+2 Economy",
-            "REPARIATION_ALLOWANCE": "N/A",
-            "HEALTH_INSURANCE": "1+1+3",
-            "ANNUAL_LEAVE_DAYS": "N/A",
-            "EDUCATION_ALLOWANCE_PER_CHILD": "N/A",
-            "EDUCATION_ALLOWANCE_TOTAL": "N/A",
-            "TUITION_EMPLOYEE": "N/A",
-            "TUITION_DEPENDENT": "N/A",
-            "TUITION_IMMEDIATE": "N/A"
-        }
-    )
-
-    # If local hire, remove commencement ticket only
-    if employment_category.lower() in ["assistant professor", "associate professor", "professor"]:
-        if st.session_state.get("hire_type", "local") == "local":
-            mapping["JOINING_TICKET"] = ""
-
-    return mapping
-
-
-# -------------------------
-# Compose Benefits Block
-# -------------------------
-def compose_benefits_block(m):
+def compose_benefits_block(m: dict) -> str:
     join_line = f"- Commencement Air Tickets: {m['JOINING_TICKET']}\n" if m.get("JOINING_TICKET") else ""
     return (
         f"- Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {m['HOUSING_ALLOWANCE']} per year (paid monthly) will be provided based on eligibility.\n"
@@ -79,71 +105,117 @@ def compose_benefits_block(m):
         f"- ADU Tuition Waiver: {m['TUITION_EMPLOYEE']}% tuition fee deduction for yourself, {m['TUITION_DEPENDENT']}% for dependents, and {m['TUITION_IMMEDIATE']}% for immediate family members, in accordance with ADU policy. This benefit is applicable upon completion of one (1) year of service."
     )
 
+def replace_placeholders(doc: Document, mapping: dict):
+    # Replace text in paragraphs and tables; rebuild runs to avoid partial leftovers
+    def replace_in_paragraph(par):
+        text = par.text
+        for k, v in mapping.items():
+            token = f"{{{{{k}}}}}"
+            if token in text:
+                text = text.replace(token, str(v))
+        for _ in range(len(par.runs)):
+            par.runs[0].text = ""
+            del par.runs[0]
+        par.add_run(text)
 
-# -------------------------
-# Streamlit UI
-# -------------------------
-st.title("📄 ADU Faculty Offer Letter Generator")
+    for p in doc.paragraphs:
+        replace_in_paragraph(p)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    replace_in_paragraph(p)
 
-with st.form("offer_form"):
-    candidate_id = st.text_input("Candidate ID")
-    name = st.text_input("Candidate Name")
-    salutation = st.selectbox("Salutation", ["Dr.", "Mr.", "Ms."])
-    telephone = st.text_input("Telephone Number")
-    personal_email = st.text_input("Personal Email")
-    position = st.text_input("Position Title")
-    department = st.text_input("College/Department Name")
-    campus = st.selectbox("Campus", ["Abu Dhabi", "Al Ain", "Dubai"])
-    reporting_manager = st.text_input("Reporting Manager’s Title")
-    salary = st.number_input("Total Monthly Salary (AED)", min_value=0)
-    probation = st.number_input("Probation Period (months)", min_value=0)
-    employment_category = st.text_input("Employment Category (e.g., Assistant Professor)")
-    marital_status = st.selectbox("Marital Status", ["Single", "Married"])
-    hire_type = st.selectbox("Hire Type", ["International", "Local"])
-    st.session_state["hire_type"] = hire_type
+def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
+    doc = Document(BytesIO(template_bytes)) if template_bytes else Document(DEFAULT_TEMPLATE_PATH)
+    replace_placeholders(doc, mapping)
+    out = BytesIO()
+    doc.save(out)
+    out.seek(0)
+    return out.getvalue()
 
-    submitted = st.form_submit_button("Generate Offer Letter")
+# ========= 4) UI =========
+st.title("📄 ADU – Faculty Offer Letter Generator")
 
-if submitted:
-    # Benefits mapping
-    benefits_map = compute_benefits_mapping(employment_category, marital_status, campus)
-    benefits_map["BENEFITS_BLOCK"] = compose_benefits_block(benefits_map)
+with st.form("offer_form", clear_on_submit=False):
+    st.subheader("Candidate & Position")
+    c1, c2 = st.columns(2)
+    with c1:
+        candidate_id = st.text_input("ID (Ref)", placeholder="TEG/2025/001")
+        salutation = st.selectbox("Salutation", ["Dr.", "Mr.", "Ms.", "Prof.", "Eng."], index=0)
+        candidate_name = st.text_input("Candidate Name", placeholder="Full Name")
+        telephone = st.text_input("Telephone", placeholder="+971-XX-XXX-XXXX")
+        personal_email = st.text_input("Personal Email", placeholder="name@example.com")
+    with c2:
+        position = st.text_input("Position Title", placeholder="Assistant Professor in ...")
+        department = st.text_input("College/Department Name", placeholder="College/Department")
+        reporting_manager = st.text_input("Reporting Manager’s Title", placeholder="Dean/Chair of ...")
+        campus = st.selectbox("Campus", ["Abu Dhabi", "Dubai", "Al Ain"], index=0)
+        salary = st.number_input("Total Monthly Compensation (AED)", min_value=0, step=500, value=0)
 
-    # Placeholder mapping
-    mapping = {
+    st.subheader("Contract Settings")
+    c3, c4, c5, c6 = st.columns(4)
+    with c3:
+        ranks = [k for k in BENEFITS.keys() if k != "_shared"]
+        rank = st.selectbox("Rank", ranks, index=ranks.index("Assistant / Lecturer") if "Assistant / Lecturer" in ranks else 0)
+    with c4:
+        marital_status = st.selectbox("Marital Status", ["Single", "Married"], index=0)
+    with c5:
+        hire_type = st.selectbox("Hire Type", ["Local", "International"], index=0)
+    with c6:
+        probation = st.number_input("Probation (months)", min_value=1, max_value=12, value=6, step=1)
+
+    st.divider()
+    uploaded_template = st.file_uploader("Upload a custom DOCX template (optional). Leave empty to use the default.", type=["docx"])
+
+    submit = st.form_submit_button("Generate Offer Letter")
+
+if submit:
+    today = datetime.now().strftime(DATE_FORMAT)
+    base_map = {
         "ID": candidate_id,
-        "NAME": name,
+        "DATE": today,
         "SALUTATION": salutation,
+        "CANDIDATE_NAME": candidate_name,
         "TELEPHONE": telephone,
-        "EMAIL": personal_email,
+        "PERSONAL_EMAIL": personal_email,
         "POSITION": position,
         "DEPARTMENT": department,
-        "CAMPUS": campus,
         "REPORTING_MANAGER": reporting_manager,
-        "SALARY": f"{salary:,.2f}",
+        "CAMPUS": campus,                               # single source of truth (prevents duplicates)
+        "SALARY": f"{int(salary):,}" if salary else "",
         "PROBATION": probation,
-        **benefits_map
     }
 
-    # Load template and replace
-    template_path = "Faculty_Offer_Letter_Template_BenefitsBlock.docx"
-    doc = Document(template_path)
-    for p in doc.paragraphs:
-        for key, value in mapping.items():
-            if f"{{{{{key}}}}}" in p.text:
-                inline = p.runs
-                for i in range(len(inline)):
-                    if f"{{{{{key}}}}}" in inline[i].text:
-                        inline[i].text = inline[i].text.replace(f"{{{{{key}}}}}", str(value))
-
-    # Save to BytesIO
-    output = BytesIO()
-    doc.save(output)
-    output.seek(0)
-
-    st.download_button(
-        label="📥 Download Offer Letter",
-        data=output,
-        file_name=f"Offer_Letter_{name.replace(' ', '_')}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    benefits_map = compute_benefits_mapping(
+        rank=rank,
+        marital=marital_status,
+        campus=campus,
+        is_international=(hire_type == "International"),
     )
+
+    mapping = {**base_map, **benefits_map}
+    mapping["BENEFITS_BLOCK"] = compose_benefits_block(mapping)
+
+    required = ["ID", "CANDIDATE_NAME", "PERSONAL_EMAIL", "POSITION", "DEPARTMENT", "REPORTING_MANAGER", "SALARY"]
+    missing = [k for k in required if not mapping.get(k)]
+    if missing:
+        st.warning("Please complete required fields: " + ", ".join(missing))
+
+    try:
+        tpl_bytes = uploaded_template.read() if uploaded_template else None
+        docx_bytes = generate_docx(tpl_bytes, mapping)
+        st.success("Offer letter generated successfully.")
+        st.download_button(
+            "⬇️ Download Offer Letter (DOCX)",
+            data=docx_bytes,
+            file_name=f"Offer_{(candidate_name or 'Candidate').replace(' ', '_')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        with st.expander("Preview benefits mapping (debug)"):
+            st.json(benefits_map)
+            st.text(mapping["BENEFITS_BLOCK"])
+    except Exception as e:
+        st.error(f"Generation failed: {e}")
+
+st.caption("Tip: Keep fonts, alignment, and logo in the Word template styles for a perfectly formatted output.")
