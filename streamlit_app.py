@@ -1,3 +1,4 @@
+# app.py
 import re
 import streamlit as st
 from docx import Document
@@ -10,6 +11,7 @@ st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄"
 DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders.docx"
 DATE_FORMAT = "%d %B %Y"
 
+# ===== BENEFITS (only 7 outputs you need) =====
 BENEFITS = {
     "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {"annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
@@ -37,7 +39,8 @@ BENEFITS = {
 def campus_key(campus: str) -> str:
     return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
 
-def fmt_amt(n: int) -> str: return f"{int(n):,}"
+def fmt_amt(n: int) -> str:
+    return f"{int(n):,}"
 
 def compute_benefits_mapping(rank: str, marital: str, campus: str, is_international: bool):
     R = BENEFITS[rank]; S = BENEFITS["_shared"]; ckey = campus_key(campus)
@@ -55,7 +58,7 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
         "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
     }
 
-# --- docx helpers ---
+# ---------- docx utils ----------
 def _set_paragraph_text(par, text: str):
     for _ in range(len(par.runs)):
         par.runs[0].text = ""
@@ -63,30 +66,32 @@ def _set_paragraph_text(par, text: str):
     par.add_run(text)
 
 def _insert_paragraph_after(paragraph, text):
-    new_p = OxmlElement("w:p")
-    paragraph._p.addnext(new_p)
-    p = paragraph._parent.add_paragraph()
-    p._p = new_p
-    _set_paragraph_text(p, text)
-    return p
+    new = OxmlElement("w:p"); paragraph._p.addnext(new)
+    p = paragraph._parent.add_paragraph(); p._p = new
+    _set_paragraph_text(p, text); return p
 
-# Robust regex replacer: handles {{ KEY }} with any spaces or run breaks
-def _regex_replace(text: str, mapping: dict) -> str:
+# robust token replacement: handles {{KEY}} or {KEY}, with run/space tolerance
+def _token_replace(text: str, mapping: dict) -> str:
     for k, v in mapping.items():
-        # collapse any stray spaces inside braces, tolerate line/run breaks
-        pattern = re.compile(r"\{\{\s*" + re.escape(k) + r"\s*\}\}")
+        pattern = re.compile(r"\{+\s*" + re.escape(k) + r"\s*\}+")  # {KEY} or {{KEY}}
         text = pattern.sub(str(v), text)
     return text
 
+# remove any leftover tokens of shape {whatever} or {{whatever}}
+TOKEN_ANY = re.compile(r"\{+\s*[^}]+\s*\}+")
+def _strip_leftover_tokens(text: str) -> str:
+    return TOKEN_ANY.sub("", text)
+
+# Benefits: rebuild to avoid duplication
 def rebuild_benefits_section(doc: Document, mapping: dict):
-    start_idx = end_idx = None
+    start = end = None
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
-        if t.startswith("3. Benefits"): start_idx = i
-        elif start_idx is not None and t.startswith("4."): end_idx = i; break
-    if start_idx is None: return
-    if end_idx is None: end_idx = len(doc.paragraphs)
-    for i in range(end_idx - 1, start_idx, -1):
+        if t.startswith("3. Benefits"): start = i
+        elif start is not None and t.startswith("4."): end = i; break
+    if start is None: return
+    if end is None: end = len(doc.paragraphs)
+    for i in range(end - 1, start, -1):
         doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
 
     lines = [
@@ -104,14 +109,11 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
         f"School Fee Subsidy: An annual subsidy of AED {mapping['EDUCATION_ALLOWANCE_PER_CHILD']} per eligible child under the age of 21 years residing in the UAE under your sponsorship, up to a maximum of AED {mapping['EDUCATION_ALLOWANCE_TOTAL']} per family. This benefit applies only to married individuals with children under their sponsorship.",
         "ADU Tuition Waiver: 75% deduction on tuition fees for self, 50% for dependents and 25% for immediate family in accordance with ADU Policy. (applicable upon completion of one year of service with ADU)",
     ]
-    anchor = doc.paragraphs[start_idx]
-    _set_paragraph_text(anchor, "3. Benefits")
+    anchor = doc.paragraphs[start]; _set_paragraph_text(anchor, "3. Benefits")
     last = anchor
     for line in lines: last = _insert_paragraph_after(last, line)
 
-# Remove paragraphs still containing unreplaced tokens, or raw-value-only lines; keep last of key policy paras
-TOKEN_PATTERN = re.compile(r"\{\{[^}]+\}\}")
-
+# cleanup: remove standalone name line; keep only last of key policies
 KEEP_LAST_STARTS = [
     "Abu Dhabi University (ADU) is pleased",
     "Your first day of employment",
@@ -119,44 +121,44 @@ KEEP_LAST_STARTS = [
     "Notice Period:",
     "Your total monthly compensation will be AED",
 ]
-
 def cleanup_after_replacement(doc: Document, mapping: dict):
-    # delete any paragraph that STILL contains {{...}}
+    # 1) Remove any remaining tokens from paragraphs instead of deleting the paragraph
+    for p in doc.paragraphs:
+        clean = _strip_leftover_tokens(p.text)
+        if clean != p.text:
+            _set_paragraph_text(p, clean)
+
+    # 2) Remove standalone "Salutation Name" line (e.g., "Dr. Dana" or "Dr. Dana,")
+    sal_name_variants = {
+        f"{mapping.get('SALUTATION','').strip()} {mapping.get('CANDIDATE_NAME','').strip()}",
+        f"{mapping.get('SALUTATION','').strip()} {mapping.get('CANDIDATE_NAME','').strip()},",
+    }
     for p in list(doc.paragraphs):
-        if TOKEN_PATTERN.search(p.text):
+        if p.text.strip() in sal_name_variants:
             p._element.getparent().remove(p._element)
 
-    # delete raw-value-only lines (e.g., 'Dr. Dana', 'Dana', '+971…')
-    raw_values = {str(mapping[k]).strip() for k in mapping if k in {
-        "SALUTATION","CANDIDATE_NAME","TELEPHONE","PERSONAL_EMAIL",
-        "ID","DATE","POSITION","DEPARTMENT","CAMPUS","REPORTING_MANAGER","SALARY","PROBATION"
-    } and mapping.get(k) not in (None, "")}
-    for p in list(doc.paragraphs):
-        if p.text.strip() in raw_values:
-            p._element.getparent().remove(p._element)
-
-    # keep only the LAST occurrence of key policy lines
+    # 3) Keep only the LAST occurrence of key policy lines
     last = {}
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
         for s in KEEP_LAST_STARTS:
-            if t.startswith(s):
-                last[s] = i
+            if t.startswith(s): last[s] = i
     for s, keep in last.items():
         for i, p in enumerate(list(doc.paragraphs)):
             if i < keep and p.text.strip().startswith(s):
                 p._element.getparent().remove(p._element)
 
 def replace_placeholders(doc: Document, mapping: dict):
-    # Replace in all paragraphs
+    # Replace in paragraphs and tables using tolerant token replacement
     for p in doc.paragraphs:
-        _set_paragraph_text(p, _regex_replace(p.text, mapping))
-    # Replace in tables too
+        text = _token_replace(p.text, mapping)
+        _set_paragraph_text(p, text)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    _set_paragraph_text(p, _regex_replace(p.text, mapping))
+                    text = _token_replace(p.text, mapping)
+                    _set_paragraph_text(p, text)
 
     rebuild_benefits_section(doc, mapping)
     cleanup_after_replacement(doc, mapping)
@@ -166,7 +168,7 @@ def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
     replace_placeholders(doc, mapping)
     out = BytesIO(); doc.save(out); out.seek(0); return out.getvalue()
 
-# ---------- UI ----------
+# ===== UI =====
 st.title("📄 ADU – Faculty Offer Letter Generator")
 with st.form("offer_form", clear_on_submit=False):
     c1, c2 = st.columns(2)
@@ -198,17 +200,17 @@ with st.form("offer_form", clear_on_submit=False):
 
 if submit:
     today = datetime.now().strftime(DATE_FORMAT)
-    base_map = {
+    base = {
         "ID": candidate_id, "DATE": today, "SALUTATION": salutation, "CANDIDATE_NAME": candidate_name,
         "TELEPHONE": telephone, "PERSONAL_EMAIL": personal_email, "POSITION": position,
         "DEPARTMENT": department, "CAMPUS": campus, "REPORTING_MANAGER": reporting_manager,
         "SALARY": f"{int(salary):,}" if salary else "", "PROBATION": probation,
     }
-    benefits_map = compute_benefits_mapping(rank, marital_status, campus, hire_type == "International")
-    mapping = {**base_map, **benefits_map}
-    tpl_bytes = uploaded_template.read() if uploaded_template else None
+    benefits = compute_benefits_mapping(rank, marital_status, campus, hire_type == "International")
+    mapping = {**base, **benefits}
+    tpl = uploaded_template.read() if uploaded_template else None
     try:
-        docx_bytes = generate_docx(tpl_bytes, mapping)
+        docx_bytes = generate_docx(tpl, mapping)
         st.success("Offer letter generated successfully.")
         st.download_button("⬇️ Download Offer Letter (DOCX)", docx_bytes,
                            file_name=f"Offer_{(candidate_name or 'Candidate').replace(' ', '_')}.docx",
