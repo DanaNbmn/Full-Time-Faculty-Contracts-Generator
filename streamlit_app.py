@@ -73,7 +73,7 @@ def _insert_paragraph_after(paragraph, text):
 # robust token replacement: handles {{KEY}} or {KEY}, with run/space tolerance
 def _token_replace(text: str, mapping: dict) -> str:
     for k, v in mapping.items():
-        pattern = re.compile(r"\{+\s*" + re.escape(k) + r"\s*\}+")  # {KEY} or {{KEY}}
+        pattern = re.compile(r"\{+\s*" + re.escape(k) + r"\s*\}+")
         text = pattern.sub(str(v), text)
     return text
 
@@ -82,7 +82,7 @@ TOKEN_ANY = re.compile(r"\{+\s*[^}]+\s*\}+")
 def _strip_leftover_tokens(text: str) -> str:
     return TOKEN_ANY.sub("", text)
 
-# Benefits: rebuild to avoid duplication
+# ---------- Benefits: rebuild to avoid duplication ----------
 def rebuild_benefits_section(doc: Document, mapping: dict):
     start = end = None
     for i, p in enumerate(doc.paragraphs):
@@ -113,35 +113,79 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
     last = anchor
     for line in lines: last = _insert_paragraph_after(last, line)
 
-# cleanup: remove standalone name line; keep only last of key policies
-KEEP_LAST_STARTS = [
-    "Abu Dhabi University (ADU) is pleased",
-    "Your first day of employment",
-    "Probation Period:",
-    "Notice Period:",
-    "Your total monthly compensation will be AED",
-]
-def cleanup_after_replacement(doc: Document, mapping: dict):
-    # 1) Remove any remaining tokens from paragraphs instead of deleting the paragraph
-    for p in doc.paragraphs:
-        clean = _strip_leftover_tokens(p.text)
-        if clean != p.text:
-            _set_paragraph_text(p, clean)
+# ---------- NEW: normalize header/intro & core policy lines ----------
+def normalize_header_and_intro(doc: Document, m: dict):
+    """
+    Force a single, clean version of:
+      Ref:, Date:, Tel No:, Email ID:, Dear ..., intro sentence, salary header.
+    Removes any 'SALUTATION NAME' standalone line.
+    """
+    labels = [
+        ("Ref:", f"Ref: {m.get('ID','')}"),
+        ("Date:", f"Date: {m.get('DATE','')}"),
+        ("Tel No:", f"Tel No: {m.get('TELEPHONE','')}"),
+        ("Email ID:", f"Email ID: {m.get('PERSONAL_EMAIL','')}"),
+    ]
+    # helper: keep last occurrence, set exact text, drop others
+    def keep_last(label, final_text):
+        idxs = [i for i, p in enumerate(doc.paragraphs) if label in p.text]
+        if not idxs: return
+        keep = idxs[-1]
+        for i in idxs[:-1]:
+            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
+        _set_paragraph_text(doc.paragraphs[keep], final_text)
 
-    # 2) Remove standalone "Salutation Name" line (e.g., "Dr. Dana" or "Dr. Dana,")
-    sal_name_variants = {
-        f"{mapping.get('SALUTATION','').strip()} {mapping.get('CANDIDATE_NAME','').strip()}",
-        f"{mapping.get('SALUTATION','').strip()} {mapping.get('CANDIDATE_NAME','').strip()},",
-    }
+    for label, final_text in labels:
+        keep_last(label, final_text)
+
+    # Remove standalone "Salutation Name" line (e.g., "Dr. Dana" or with comma)
+    sal = (m.get("SALUTATION","") + " " + m.get("CANDIDATE_NAME","")).strip()
     for p in list(doc.paragraphs):
-        if p.text.strip() in sal_name_variants:
+        t = p.text.strip()
+        if t == sal or t == sal + ",":
             p._element.getparent().remove(p._element)
 
-    # 3) Keep only the LAST occurrence of key policy lines
+    # Ensure single clean "Dear ..." line (keep last)
+    dear = f"Dear {sal},"
+    dear_idxs = [i for i, p in enumerate(doc.paragraphs) if p.text.strip().startswith("Dear")]
+    if dear_idxs:
+        keep = dear_idxs[-1]
+        for i in dear_idxs[:-1]:
+            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
+        _set_paragraph_text(doc.paragraphs[keep], dear)
+
+    # Intro paragraph (keep ONE, set exact text)
+    intro = ("Abu Dhabi University (ADU) is pleased to offer you a contract of employment "
+             f"for the position of {m.get('POSITION','')} in the {m.get('DEPARTMENT','')} "
+             f"based in {m.get('CAMPUS','')}, UAE. This position reports to the "
+             f"{m.get('REPORTING_MANAGER','')}.")
+    intro_idxs = [i for i, p in enumerate(doc.paragraphs) if "Abu Dhabi University (ADU) is pleased" in p.text]
+    if intro_idxs:
+        keep = intro_idxs[-1]
+        for i in intro_idxs[:-1]:
+            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
+        _set_paragraph_text(doc.paragraphs[keep], intro)
+
+    # Salary header line (keep one and format)
+    salary_idxs = [i for i, p in enumerate(doc.paragraphs) if "Your total monthly compensation" in p.text]
+    if salary_idxs:
+        keep = salary_idxs[-1]
+        for i in salary_idxs[:-1]:
+            doc.paragraphs[i]._element.getparent().remove(doc.paragraphs[i]._element)
+        _set_paragraph_text(doc.paragraphs[keep],
+                            f"Your total monthly compensation will be AED {m.get('SALARY','')}, comprising:")
+
+def normalize_policy_duplicates(doc: Document):
+    # Keep only the LAST occurrence across doc (paragraph-level)
+    starts = [
+        "Your first day of employment",
+        "Probation Period:",
+        "Notice Period:",
+    ]
     last = {}
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
-        for s in KEEP_LAST_STARTS:
+        for s in starts:
             if t.startswith(s): last[s] = i
     for s, keep in last.items():
         for i, p in enumerate(list(doc.paragraphs)):
@@ -149,19 +193,27 @@ def cleanup_after_replacement(doc: Document, mapping: dict):
                 p._element.getparent().remove(p._element)
 
 def replace_placeholders(doc: Document, mapping: dict):
-    # Replace in paragraphs and tables using tolerant token replacement
+    # 1) Replace tokens everywhere (tolerant of run breaks / single braces)
     for p in doc.paragraphs:
-        text = _token_replace(p.text, mapping)
-        _set_paragraph_text(p, text)
+        _set_paragraph_text(p, _token_replace(p.text, mapping))
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    text = _token_replace(p.text, mapping)
-                    _set_paragraph_text(p, text)
+                    _set_paragraph_text(p, _token_replace(p.text, mapping))
 
+    # 2) Strip any leftover tokens inline (don’t drop the paragraph)
+    for p in doc.paragraphs:
+        clean = _strip_leftover_tokens(p.text)
+        if clean != p.text:
+            _set_paragraph_text(p, clean)
+
+    # 3) Normalize header/intro & salary line, then core policy duplicates
+    normalize_header_and_intro(doc, mapping)
+    normalize_policy_duplicates(doc)
+
+    # 4) Rebuild Benefits cleanly
     rebuild_benefits_section(doc, mapping)
-    cleanup_after_replacement(doc, mapping)
 
 def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
     doc = Document(BytesIO(template_bytes)) if template_bytes else Document(DEFAULT_TEMPLATE_PATH)
