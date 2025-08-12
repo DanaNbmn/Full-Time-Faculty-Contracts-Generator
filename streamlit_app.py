@@ -10,11 +10,11 @@ st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄"
 
 DATE_FORMAT = "%d %B %Y"
 
-# Fallback filenames in the app folder
-DEFAULT_HEADER_LOGO = "adu_logo.png"     # header logo image
-DEFAULT_FOOTER_BANNER = "adu_footer.png" # footer banner image
+# Files bundled with the app
+DEFAULT_HEADER_LOGO = "adu_logo.png"     # header logo
+DEFAULT_FOOTER_BANNER = "adu_footer.png" # footer banner
 
-# ==== Your benefits table (unchanged) ====
+# ==== Benefits table (unchanged) ====
 BENEFITS = {
     "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {
@@ -99,22 +99,25 @@ def bold_prefix_before_colon(paragraph):
     paragraph.add_run(rest)
 
 def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: bytes | None):
-    """Apply the same header/footer to every page of every section."""
-    # Use one header/footer for all pages (no separate first/even headers)
+    """Apply same header/footer to every page; footer spans full page width."""
     try:
         doc.settings.odd_and_even_pages_header_footer = False
     except Exception:
         pass
 
     for section in doc.sections:
-        # Ensure first page uses the same header/footer
+        # Use same header/footer on first/odd/even pages
         try:
             section.different_first_page_header_footer = False
         except Exception:
             pass
 
+        # Footer banner edge-to-edge: remove side margins
+        section.left_margin = Inches(0)
+        section.right_margin = Inches(0)
+
         section.header_distance = Inches(0.5)
-        section.footer_distance = Inches(0.0)
+        section.footer_distance = Inches(0.5)
 
         # ----- Header -----
         header = section.header
@@ -131,7 +134,7 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         except Exception:
             pass
 
-        # ----- Footer -----
+        # ----- Footer (full-width image) -----
         footer = section.footer
         if not footer.paragraphs:
             footer.add_paragraph()
@@ -142,6 +145,7 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         try:
             frun = fp.add_run()
             if footer_bytes:
+                # page_width is already a Length; use it directly to span side-to-side
                 frun.add_picture(BytesIO(footer_bytes), width=section.page_width, height=Inches(0.57))
         except Exception:
             pass
@@ -150,6 +154,9 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     doc = Document()
 
     # Title
+    p = doc.add_paragraph("Abu Dhabi University Offer Letter")
+    p.runs[0].bold = True
+    p.runs[0].font.size = Pt(11)
 
     doc.add_paragraph(f"Ref: {m['ID']}")
     doc.add_paragraph(f"Date: {m['DATE']}")
@@ -286,16 +293,16 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     doc.add_paragraph("Signature: _______________________________")
     doc.add_paragraph("Date: ___________________________________")
 
-    # Normalize fonts
+    # Normalize base font
     style = doc.styles["Normal"]
     style.font.name = "Times New Roman"
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
     style.font.size = Pt(11)
 
-    # Apply header & footer with exact sizes (all pages)
+    # Header & footer on all pages; footer spans full width
     apply_header_footer(doc, logo_bytes, footer_bytes)
 
-    # Bold all subtitles (prefix before first ":")
+    # Bold prefixes before ":" across the doc
     for par in doc.paragraphs:
         bold_prefix_before_colon(par)
 
@@ -364,11 +371,3 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
-
-
-
-
-
-
-
-
