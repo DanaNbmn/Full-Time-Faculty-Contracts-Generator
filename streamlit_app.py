@@ -2,12 +2,17 @@ import streamlit as st
 from io import BytesIO
 from datetime import datetime
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
 
 DATE_FORMAT = "%d %B %Y"
+
+# === Configure header/footer image filenames ===
+HEADER_LOGO_PATH = "adu_logo.png"     # centered in header
+FOOTER_BANNER_PATH = "adu_footer.png" # stretched across footer
 
 # ---------------- Benefits (7 fields only) ----------------
 BENEFITS = {
@@ -74,12 +79,68 @@ def add_heading(doc, text):
     return p
 
 def add_bullet(doc, text):
-    p = doc.add_paragraph(text, style="List Bullet")
+    doc.add_paragraph(text, style="List Bullet")
+
+# === NEW: helper to bold any subtitle (text before first colon) ===
+def bold_prefix_before_colon(paragraph):
+    txt = paragraph.text
+    if ":" not in txt:
+        return
+    # split once at first colon
+    prefix, rest = txt.split(":", 1)
+    prefix += ":"  # include the colon in bold part
+    # rebuild runs
+    for _ in range(len(paragraph.runs)):
+        paragraph.runs[0].text = ""
+        del paragraph.runs[0]
+    r1 = paragraph.add_run(prefix)
+    r1.bold = True
+    r1.font.size = Pt(11)
+    paragraph.add_run(rest)
+
+# === NEW: add logo to header (centered) and banner to footer (full width) ===
+def apply_header_footer(doc: Document):
+    for section in doc.sections:
+        # usable width for footer image
+        usable_width = section.page_width - section.left_margin - section.right_margin
+
+        # Header logo centered
+        header = section.header
+        if not header.paragraphs:
+            header.add_paragraph()
+        hp = header.paragraphs[0]
+        hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            hp.clear()  # docx 1.1+; harmless if not present
+        except Exception:
+            pass
+        run = hp.add_run()
+        try:
+            run.add_picture(HEADER_LOGO_PATH)  # natural size
+        except Exception:
+            # if file missing, leave header blank (no crash)
+            pass
+
+        # Footer banner full width
+        footer = section.footer
+        if not footer.paragraphs:
+            footer.add_paragraph()
+        fp = footer.paragraphs[0]
+        fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            fp.clear()
+        except Exception:
+            pass
+        frun = fp.add_run()
+        try:
+            frun.add_picture(FOOTER_BANNER_PATH, width=usable_width)
+        except Exception:
+            pass
 
 def build_letter(m):
     doc = Document()
 
-    # (Optional) Title line—keep simple. Replace with your header/logo if needed.
+    # Title line (kept)
     p = doc.add_paragraph("Abu Dhabi University Offer Letter")
     p.runs[0].bold = True
     p.runs[0].font.size = Pt(11)
@@ -135,10 +196,9 @@ def build_letter(m):
         "Annual Leave Airfare: Cash in lieu of economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children "
         "under the age of 21 years residing in the UAE, based on ADU’s published schedule of rates including your country of origin. This amount "
         "will be paid annually in the month of May, prorated to your joining date."
-  )
+    )
     if m["JOINING_TICKET"]:
         doc.add_paragraph(f"Commencement Air Tickets: {m['JOINING_TICKET']}")
-  
     doc.add_paragraph(
         "Relocation Allowance: Up to AED 3,000 at the commencement of employment to support the relocation of personal effects to ADU-provided accommodation."
         "Reimbursement will be subject to submission of original receipts."
@@ -222,11 +282,18 @@ def build_letter(m):
     doc.add_paragraph("Signature: _______________________________")
     doc.add_paragraph("Date: ___________________________________")
 
-    # Simple font normalization (optional)
+    # Simple font normalization (kept)
     style = doc.styles["Normal"]
     style.font.name = "Times New Roman"
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
     style.font.size = Pt(11)
+
+    # === apply header/footer images ===
+    apply_header_footer(doc)
+
+    # === post-process: bold any prefix before colon (subtitles) ===
+    for par in doc.paragraphs:
+        bold_prefix_before_colon(par)
 
     out = BytesIO(); doc.save(out); out.seek(0)
     return out.getvalue()
@@ -290,5 +357,3 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
-
-
