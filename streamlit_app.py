@@ -99,17 +99,22 @@ def bold_prefix_before_colon(paragraph):
     paragraph.add_run(rest)
 
 def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: bytes | None):
-    """Header/footer on every page; footer spans full width between margins."""
+    """Apply same header/footer to every page; footer spans full page width."""
     try:
         doc.settings.odd_and_even_pages_header_footer = False
     except Exception:
         pass
 
     for section in doc.sections:
+        # Use same header/footer on first/odd/even pages
         try:
             section.different_first_page_header_footer = False
         except Exception:
             pass
+
+        # Footer banner edge-to-edge: remove side margins
+        section.left_margin = Inches(5)
+        section.right_margin = Inches(5)
 
         section.header_distance = Inches(0.5)
         section.footer_distance = Inches(0.5)
@@ -120,10 +125,8 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
             header.add_paragraph()
         hp = header.paragraphs[0]
         hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        try: 
-            hp.clear()
-        except Exception: 
-            pass
+        try: hp.clear()
+        except Exception: pass
         try:
             run = hp.add_run()
             if logo_bytes:
@@ -131,21 +134,19 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         except Exception:
             pass
 
-        # ----- Footer (span from left margin to right margin) -----
+        # ----- Footer (full-width image) -----
         footer = section.footer
         if not footer.paragraphs:
             footer.add_paragraph()
         fp = footer.paragraphs[0]
         fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        try: 
-            fp.clear()
-        except Exception: 
-            pass
+        try: fp.clear()
+        except Exception: pass
         try:
             frun = fp.add_run()
             if footer_bytes:
-                footer_width = section.page_width - section.left_margin - section.right_margin
-                frun.add_picture(BytesIO(footer_bytes), width=footer_width, height=Inches(0.57))
+                # page_width is already a Length; use it directly to span side-to-side
+                frun.add_picture(BytesIO(footer_bytes), width=section.page_width, height=Inches(0.57))
         except Exception:
             pass
 
@@ -298,7 +299,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
     style.font.size = Pt(11)
 
-    # Header & footer on all pages; footer spans margin-to-margin
+    # Header & footer on all pages; footer spans full width
     apply_header_footer(doc, logo_bytes, footer_bytes)
 
     # Bold prefixes before ":" across the doc
