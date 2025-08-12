@@ -13,31 +13,31 @@ DATE_FORMAT = "%d %B %Y"
 BENEFITS = {
     "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {
-        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Associate / Sr. Lecturer": {
-        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Assistant / Lecturer": {
-        "annual_leave_days": 56, "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 56, "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Senior Instructor": {
-        "annual_leave_days": 42, "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 42, "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
     },
     "Instructor": {
-        "annual_leave_days": 42, "joining_ticket_international": "1+1+2 Economy",
+        "annual_leave_days": 42, "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
@@ -138,6 +138,11 @@ def build_letter(m):
     )
     if m["JOINING_TICKET"]:
         doc.add_paragraph(f"Commencement Air Tickets: {m['JOINING_TICKET']}")
+  
+doc.add_paragraph(
+        "Relocation Allowance: Up to AED 3,000 at the commencement of employment to support the relocation of personal effects to ADU-provided accommodation."
+        "Reimbursement will be subject to submission of original receipts."
+    )
     doc.add_paragraph(
         "Repatriation Air Tickets: You will be provided with Economy Class air tickets for yourself, spouse and your eligible dependents "
         "(up to 2 children under 21 years) residing in the UAE upon your end of employment to your country of origin."
@@ -285,3 +290,4 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
