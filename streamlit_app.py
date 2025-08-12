@@ -71,7 +71,7 @@ def compute_benefits(rank: str, marital: str, campus: str, is_international: boo
         "JOINING_TICKET": R["joining_ticket_international"] if is_international else "",
         "REPARIATION_ALLOWANCE": fmt_amt(R["repatriation_allowance"]),
         "ANNUAL_LEAVE_DAYS": R["annual_leave_days"],
-        "EDUCATION_ALLOWANCE_PER_CHILD": fmt_amt(edu),
+        "EDUCATION_ALLOWANCE_PER_CHILD": fmt_amt(edu/2),
         "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
     }
 
@@ -365,4 +365,5 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
 
