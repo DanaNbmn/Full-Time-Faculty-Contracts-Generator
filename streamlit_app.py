@@ -135,11 +135,11 @@ def build_letter(m):
         "Annual Leave Airfare: Cash in lieu of economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children "
         "under the age of 21 years residing in the UAE, based on ADU’s published schedule of rates including your country of origin. This amount "
         "will be paid annually in the month of May, prorated to your joining date."
-    )
+  )
     if m["JOINING_TICKET"]:
         doc.add_paragraph(f"Commencement Air Tickets: {m['JOINING_TICKET']}")
   
-doc.add_paragraph(
+    doc.add_paragraph(
         "Relocation Allowance: Up to AED 3,000 at the commencement of employment to support the relocation of personal effects to ADU-provided accommodation."
         "Reimbursement will be subject to submission of original receipts."
     )
@@ -290,4 +290,5 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
 
