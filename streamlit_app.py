@@ -99,9 +99,24 @@ def bold_prefix_before_colon(paragraph):
     paragraph.add_run(rest)
 
 def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: bytes | None):
+    """Apply the same header/footer to every page of every section."""
+    # Use one header/footer for all pages (no separate first/even headers)
+    try:
+        doc.settings.odd_and_even_pages_header_footer = False
+    except Exception:
+        pass
+
     for section in doc.sections:
+        # Ensure first page uses the same header/footer
+        try:
+            section.different_first_page_header_footer = False
+        except Exception:
+            pass
+
         section.header_distance = Inches(0.5)
         section.footer_distance = Inches(0.5)
+
+        # ----- Header -----
         header = section.header
         if not header.paragraphs:
             header.add_paragraph()
@@ -115,6 +130,8 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
                 run.add_picture(BytesIO(logo_bytes), width=Inches(2.0), height=Inches(1.5))
         except Exception:
             pass
+
+        # ----- Footer -----
         footer = section.footer
         if not footer.paragraphs:
             footer.add_paragraph()
@@ -131,15 +148,21 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
 
 def build_letter(m, logo_bytes=None, footer_bytes=None):
     doc = Document()
+
+    # Title
+    p = doc.add_paragraph("Abu Dhabi University Offer Letter")
     p.runs[0].bold = True
     p.runs[0].font.size = Pt(11)
+
     doc.add_paragraph(f"Ref: {m['ID']}")
     doc.add_paragraph(f"Date: {m['DATE']}")
     doc.add_paragraph("")
+
     doc.add_paragraph(f"{m['SALUTATION']} {m['CANDIDATE_NAME']}")
     doc.add_paragraph(f"Tel No: {m['TELEPHONE']}")
     doc.add_paragraph(f"Email ID: {m['PERSONAL_EMAIL']}")
     doc.add_paragraph("")
+
     doc.add_paragraph(f"Dear {m['SALUTATION']} {m['CANDIDATE_NAME']},")
     doc.add_paragraph(
         f"Abu Dhabi University (ADU) is pleased to offer you a contract of employment for the "
@@ -151,11 +174,15 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
         "of legal approvals, and the term of your contract shall be limited to a period of two (2) years, "
         "renewable upon mutual agreement."
     )
+
+    # 1. Package
     add_heading(doc, "1. Package")
     doc.add_paragraph(f"Your total monthly compensation will be AED {m['SALARY']}, comprising:")
     add_bullet(doc, "Basic Salary: 50% of the total monthly compensation.")
     add_bullet(doc, "Other Allowance: 50% of the total monthly compensation.")
     doc.add_paragraph("Payment will be made at the end of each calendar month.")
+
+    # 2. Terms and Conditions
     add_heading(doc, "2. Terms and Conditions")
     doc.add_paragraph(f"Probation Period: The first {m['PROBATION']} months from the start date shall constitute the probationary period.")
     doc.add_paragraph(
@@ -163,6 +190,8 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
         "by providing one academic semester’s written notice, coinciding with the end of the semester, or payment in lieu, "
         "in accordance with ADU policy."
     )
+
+    # 3. Benefits
     add_heading(doc, "3. Benefits")
     doc.add_paragraph(
         f"Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {m['HOUSING_ALLOWANCE']} per year "
@@ -193,51 +222,86 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     )
     doc.add_paragraph(
         "Medical Insurance: You will be provided with medical insurance coverage for yourself, spouse and your eligible dependents "
-        "(up to 3 children under 21 years) residing in the UAE."
+        "(up to 3 children under 21 years) residing in the UAE. (Applicable only for married individuals with spouse/children under their sponsorship)"
     )
     doc.add_paragraph(f"Annual Leave Entitlement: {m['ANNUAL_LEAVE_DAYS']} calendar days of paid annual leave.")
     doc.add_paragraph(
         f"School Fee Subsidy: An annual subsidy of AED {m['EDUCATION_ALLOWANCE_PER_CHILD']} per eligible child under the age of 21 years residing "
-        f"in the UAE under your sponsorship, up to a maximum of AED {m['EDUCATION_ALLOWANCE_TOTAL']} per family."
+        f"in the UAE under your sponsorship, up to a maximum of AED {m['EDUCATION_ALLOWANCE_TOTAL']} per family. This benefit applies only to married "
+        "individuals with children under their sponsorship."
     )
-    doc.add_paragraph("ADU Tuition Waiver: 75% deduction on tuition fees for self, 50% for dependents and 25% for immediate family.")
+    doc.add_paragraph(
+        "ADU Tuition Waiver: 75% deduction on tuition fees for self, 50% for dependents and 25% for immediate family in accordance with ADU Policy. "
+        "(applicable upon completion of one year of service with ADU)"
+    )
+
+    # 4. End of Service Entitlements
     add_heading(doc, "4. End of Service Entitlements")
     doc.add_paragraph(
-        "End of Service Gratuity: Calculated at one (1) month’s basic salary for each completed year of service."
+        "End of Service Gratuity: Calculated at one (1) month’s basic salary for each completed year of service, "
+        "in accordance with ADU policy and UAE Labour Law. This will be prorated for any partial years of service. "
+        "No gratuity is payable for service of less than one (1) year."
     )
+
+    # 5. Additional Provisions
     add_heading(doc, "5. Additional Provisions")
-    doc.add_paragraph("a) If married, any benefits provided by the spouse’s employer will not be duplicated by ADU.")
+    doc.add_paragraph(
+        "a) If married, any benefits provided by the spouse’s employer will not be duplicated by ADU. You are required to declare to TEG any benefits "
+        "at the time of acceptance of this offer and of any future change in your spouse’s benefits while you are employed at ADU."
+    )
     doc.add_paragraph("b) You may be requested to teach in other ADU campuses as required by the college.")
+
+    # 6. Documentation Requirements
     add_heading(doc, "6. Documentation Requirements")
     for item in [
-        "MOHESR Clearance.",
+        "Ministry of Higher Education and Scientific Research (MOHESR) Clearance.",
         "Completion of visa and ADU sponsorship formalities.",
         "Attestation of original academic qualifications.",
         "Medical examination and clearance.",
         "Notarized copies of marriage and birth certificates (if applicable).",
-        "Police/CRB Clearance.",
-        "Satisfactory references.",
+        "Provision of a current and valid Police/CRB Clearance.",
+        "Receipt of satisfactory references.",
     ]:
         doc.add_paragraph(item, style="List Bullet")
-    doc.add_paragraph("By accepting this offer, you attest that all provided information is accurate and complete.")
+
+    doc.add_paragraph(
+        "By accepting this offer, you attest that all personal and business information and documents provided to ADU are true, accurate, and complete. "
+        "You further acknowledge that any discrepancy in such information or documents may lead to the withdrawal of this Employment Offer and the termination "
+        "of your employment contract, even after you have joined."
+    )
+
+    # 7. Validity
     add_heading(doc, "7. Validity")
     doc.add_paragraph("Your acceptance of this offer must be received within ten (10) working days from the date of this letter.")
+    doc.add_paragraph(
+        "This offer, once signed, constitutes an official agreement between Abu Dhabi University and yourself. Your signature on this document indicates your agreement "
+        "with the included terms and conditions of employment and supersedes all other written and/or verbal agreements, understandings, and offers."
+    )
     doc.add_paragraph("We look forward to welcoming you to Abu Dhabi University.")
     doc.add_paragraph("Sincerely,")
     doc.add_paragraph("Prof. Hamad Ebrahim Ali Odhabi")
     doc.add_paragraph("Vice Chancellor for AI and Operational Excellence")
+
     doc.add_paragraph("")
     add_heading(doc, "Acknowledgment and Acceptance")
+    doc.add_paragraph("I accept this offer of employment and agree to sign the Ministry of Labour Contract upon joining ADU.")
     doc.add_paragraph(f"Name (print): {m['SALUTATION']} {m['CANDIDATE_NAME']}")
     doc.add_paragraph("Signature: _______________________________")
     doc.add_paragraph("Date: ___________________________________")
+
+    # Normalize fonts
     style = doc.styles["Normal"]
     style.font.name = "Times New Roman"
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
     style.font.size = Pt(11)
+
+    # Apply header & footer with exact sizes (all pages)
     apply_header_footer(doc, logo_bytes, footer_bytes)
+
+    # Bold all subtitles (prefix before first ":")
     for par in doc.paragraphs:
         bold_prefix_before_colon(par)
+
     out = BytesIO(); doc.save(out); out.seek(0)
     return out.getvalue()
 
@@ -259,6 +323,7 @@ with st.form("offer_form", clear_on_submit=False):
         reporting_manager = st.text_input("Reporting Manager’s Title")
         campus = st.selectbox("Campus", ["Abu Dhabi", "Dubai", "Al Ain"])
         salary = st.number_input("Total Monthly Compensation (AED)", min_value=0, step=500, value=0)
+
     st.subheader("Contract Settings")
     c3, c4, c5, c6 = st.columns(4)
     with c3:
@@ -269,10 +334,12 @@ with st.form("offer_form", clear_on_submit=False):
         hire_type = st.selectbox("Hire Type", ["Local", "International"])
     with c6:
         probation = st.number_input("Probation (months)", min_value=1, max_value=12, value=6)
+
     submit = st.form_submit_button("Generate Offer Letter")
 
 if submit:
     today = datetime.now().strftime(DATE_FORMAT)
+
     base = {
         "ID": candidate_id, "DATE": today, "SALUTATION": salutation, "CANDIDATE_NAME": candidate_name,
         "TELEPHONE": telephone, "PERSONAL_EMAIL": personal_email, "POSITION": position,
@@ -281,10 +348,13 @@ if submit:
     }
     benefits = compute_benefits(rank, marital_status, campus, hire_type == "International")
     m = {**base, **benefits}
+
+    # Always use bundled images
     with open(DEFAULT_HEADER_LOGO, "rb") as f:
         logo_bytes = f.read()
     with open(DEFAULT_FOOTER_BANNER, "rb") as f:
         footer_bytes = f.read()
+
     try:
         docx_bytes = build_letter(m, logo_bytes=logo_bytes, footer_bytes=footer_bytes)
         st.success("Offer letter generated successfully.")
@@ -297,4 +367,3 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
-
