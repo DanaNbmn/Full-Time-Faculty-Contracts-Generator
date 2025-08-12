@@ -8,9 +8,9 @@ from docx.oxml import OxmlElement
 st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
 
 DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders.docx"
-DATE_FORMAT = "%d %B %Y"  # e.g., 12 August 2025
+DATE_FORMAT = "%d %B %Y"
 
-# ===== BENEFITS (only the 7 fields you require) =====
+# ===== BENEFITS (only the 7 outputs you require) =====
 BENEFITS = {
     "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {
@@ -45,9 +45,8 @@ BENEFITS = {
     },
 }
 
-# ========== helpers ==========
+# ---------- helpers ----------
 def campus_key(campus: str) -> str:
-    # Dubai follows Abu Dhabi rules
     return "AD/Dubai" if campus in ("Abu Dhabi", "Dubai", "AD/Dubai") else "AA"
 
 def fmt_amt(n: int) -> str:
@@ -69,100 +68,69 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
         "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
     }
 
-# docx utils
-TOKEN_ANY = re.compile(r"\{+\s*[^}]+\s*\}+")
-
-def _set_paragraph_text(par, text: str):
+# ---------- docx utilities ----------
+def _set_par_text(par, text: str):
     for _ in range(len(par.runs)):
         par.runs[0].text = ""
         del par.runs[0]
     par.add_run(text)
 
-def _insert_paragraph_after(paragraph, text):
-    new = OxmlElement("w:p"); paragraph._p.addnext(new)
-    p = paragraph._parent.add_paragraph(); p._p = new
-    _set_paragraph_text(p, text); return p
+def _insert_after(par, text: str):
+    new = OxmlElement("w:p"); par._p.addnext(new)
+    p = par._parent.add_paragraph(); p._p = new
+    _set_par_text(p, text); return p
 
+# token replace tolerant of run/space + single or double braces
 def _token_replace(text: str, mapping: dict) -> str:
-    # Replace {{KEY}} or {KEY}, tolerant of spaces/run splits
     for k, v in mapping.items():
         text = re.sub(r"\{+\s*" + re.escape(k) + r"\s*\}+", str(v), text)
     return text
 
-def purge_placeholder_paragraphs(doc: Document):
-    # Remove any paragraph that still contains a token
-    for p in list(doc.paragraphs):
-        if ("{{" in p.text) or ("}}" in p.text) or TOKEN_ANY.search(p.text):
-            p._element.getparent().remove(p._element)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for p in list(cell.paragraphs):
-                    if ("{{" in p.text) or ("}}" in p.text) or TOKEN_ANY.search(p.text):
-                        p._element.getparent().remove(p._element)
+# strip any leftover tokens inline (do NOT delete paragraph)
+TOKEN_ANY = re.compile(r"\{+\s*[^}]+\s*\}+")
+def _strip_tokens_inline(text: str) -> str:
+    return TOKEN_ANY.sub("", text)
 
-def normalize_header_intro_salary_terms(doc: Document, m: dict):
-    # Ensure single clean Ref/Date/Tel/Email lines
-    def keep_last_by_label(label_text: str, final_text: str):
-        hits = [p for p in doc.paragraphs if label_text in p.text]
-        if not hits: return
-        keep = hits[-1]
-        for p in hits[:-1]:
-            p._element.getparent().remove(p._element)
-        _set_paragraph_text(keep, final_text)
+# de-dup content repeated inside the SAME paragraph (keep last anchor)
+INTRAPARA_ANCHORS = [
+    "Ref:", "Date:", "Tel No:", "Email ID:",
+    "Abu Dhabi University (ADU) is pleased",
+    "Your total monthly compensation will be AED",
+    "Probation Period:", "Notice Period:",
+    "3. Benefits",
+]
+def _dedup_in_paragraph(text: str) -> str:
+    for a in INTRAPARA_ANCHORS:
+        first = text.find(a)
+        if first != -1:
+            last = text.rfind(a)
+            if last != first:
+                text = text[last:]  # keep last occurrence onward
+    return text
 
-    keep_last_by_label("Ref:",  f"Ref: {m.get('ID','')}")
-    keep_last_by_label("Date:", f"Date: {m.get('DATE','')}")
-    keep_last_by_label("Tel No:", f"Tel No: {m.get('TELEPHONE','')}")
-    keep_last_by_label("Email ID:", f"Email ID: {m.get('PERSONAL_EMAIL','')}")
+# keep only LAST paragraph across doc for certain starts
+DOCLEVEL_KEEP_LAST_STARTS = [
+    "Abu Dhabi University (ADU) is pleased",
+    "Your first day of employment",
+    "Probation Period:",
+    "Notice Period:",
+    "Your total monthly compensation will be AED",
+]
 
-    # Remove standalone "Salutation Name" line, keep only "Dear ..."
-    sal = (m.get("SALUTATION","") + " " + m.get("CANDIDATE_NAME","")).strip()
-    sal_variants = {sal, sal + ","}
-    for p in list(doc.paragraphs):
-        if p.text.strip() in sal_variants:
-            p._element.getparent().remove(p._element)
-    dear = f"Dear {sal},"
-    dears = [p for p in doc.paragraphs if p.text.strip().startswith("Dear")]
-    if dears:
-        for p in dears[:-1]:
-            p._element.getparent().remove(p._element)
-        _set_paragraph_text(dears[-1], dear)
-
-    # Intro sentence (keep last, exact text)
-    intro = ("Abu Dhabi University (ADU) is pleased to offer you a contract of employment "
-             f"for the position of {m.get('POSITION','')} in the {m.get('DEPARTMENT','')} "
-             f"based in {m.get('CAMPUS','')}, UAE. This position reports to the "
-             f"{m.get('REPORTING_MANAGER','')}.")
-    intros = [p for p in doc.paragraphs if "Abu Dhabi University (ADU) is pleased" in p.text]
-    if intros:
-        for p in intros[:-1]:
-            p._element.getparent().remove(p._element)
-        _set_paragraph_text(intros[-1], intro)
-
-    # Salary heading (keep last, exact text)
-    salaries = [p for p in doc.paragraphs if "Your total monthly compensation" in p.text]
-    if salaries:
-        for p in salaries[:-1]:
-            p._element.getparent().remove(p._element)
-        _set_paragraph_text(salaries[-1],
-            f"Your total monthly compensation will be AED {m.get('SALARY','')}, comprising:")
-
-    # Keep only the last of these policy lines
-    starts = ["Your first day of employment", "Probation Period:", "Notice Period:"]
-    last = {}
+def _keep_last_across_doc(doc: Document):
+    last_obj = {}
     for p in doc.paragraphs:
         t = p.text.strip()
-        for s in starts:
-            if t.startswith(s): last[s] = p
-    for s, keep_par in last.items():
+        for s in DOCLEVEL_KEEP_LAST_STARTS:
+            if t.startswith(s): last_obj[s] = p
+    for s, keep_p in last_obj.items():
         for p in list(doc.paragraphs):
-            if p is keep_par: continue
+            if p is keep_p: continue
             if p.text.strip().startswith(s):
                 p._element.getparent().remove(p._element)
 
-def rebuild_benefits_section(doc: Document, mapping: dict):
-    # Find 3. Benefits .. next "4."
+# Benefits: rebuild section body (but keep the header paragraph as-is)
+def rebuild_benefits_section(doc: Document, m: dict):
     start = end = None
     for i, p in enumerate(doc.paragraphs):
         t = p.text.strip()
@@ -171,52 +139,61 @@ def rebuild_benefits_section(doc: Document, mapping: dict):
     if start is None: return
     if end is None: end = len(doc.paragraphs)
 
-    # Remove all lines after the header within the section
-    to_remove = [doc.paragraphs[i]._element for i in range(start + 1, end)]
-    for el in to_remove:
-        el.getparent().remove(el)
+    # Remove existing body (after header)
+    to_remove = [doc.paragraphs[i]._element for i in range(start+1, end)]
+    for el in to_remove: el.getparent().remove(el)
 
-    # Compose clean lines from 7 values
     lines = [
-        f"Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {mapping['HOUSING_ALLOWANCE']} per year (paid monthly) will be provided based on eligibility.",
-        f"Furniture Allowance: AED {mapping['FURNITURE_ALLOWANCE']} provided at the commencement of employment as a forgivable loan amortized over three (3) years. Should you leave ADU before completing three years of service, the amount will be repayable on a pro-rata basis.",
+        f"Accommodation: Unfurnished on-campus accommodation based on availability, or a housing allowance of AED {m['HOUSING_ALLOWANCE']} per year (paid monthly) will be provided based on eligibility.",
+        f"Furniture Allowance: AED {m['FURNITURE_ALLOWANCE']} provided at the commencement of employment as a forgivable loan amortized over three (3) years. Should you leave ADU before completing three years of service, the amount will be repayable on a pro-rata basis.",
         "Annual Leave Airfare: Cash in lieu of economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, based on ADU’s published schedule of rates including your country of origin. This amount will be paid annually in the month of May, prorated to your joining date.",
     ]
-    if mapping.get("JOINING_TICKET"):
-        lines.append(f"Commencement Air Tickets: {mapping['JOINING_TICKET']}")
+    if m.get("JOINING_TICKET"):
+        lines.append(f"Commencement Air Tickets: {m['JOINING_TICKET']}")
     lines += [
         "Repatriation Air Tickets: You will be provided with Economy Class air tickets for yourself, spouse and your eligible dependents (up to 2 children under 21 years) residing in the UAE upon your end of employment to your country of origin.",
-        f"Repatriation Allowance: AED {mapping['REPARIATION_ALLOWANCE']} upon conclusion of your contract, applicable only upon completion of two (2) years of continuous service with ADU.",
+        f"Repatriation Allowance: AED {m['REPARIATION_ALLOWANCE']} upon conclusion of your contract, applicable only upon completion of two (2) years of continuous service with ADU.",
         "Medical Insurance: You will be provided with medical insurance coverage for yourself, spouse and your eligible dependents (up to 3 children under 21 years) residing in the UAE. (Applicable only for married individuals with spouse/children under their sponsorship)",
-        f"Annual Leave Entitlement: {mapping['ANNUAL_LEAVE_DAYS']} calendar days of paid annual leave.",
-        f"School Fee Subsidy: An annual subsidy of AED {mapping['EDUCATION_ALLOWANCE_PER_CHILD']} per eligible child under the age of 21 years residing in the UAE under your sponsorship, up to a maximum of AED {mapping['EDUCATION_ALLOWANCE_TOTAL']} per family. This benefit applies only to married individuals with children under their sponsorship.",
+        f"Annual Leave Entitlement: {m['ANNUAL_LEAVE_DAYS']} calendar days of paid annual leave.",
+        f"School Fee Subsidy: An annual subsidy of AED {m['EDUCATION_ALLOWANCE_PER_CHILD']} per eligible child under the age of 21 years residing in the UAE under your sponsorship, up to a maximum of AED {m['EDUCATION_ALLOWANCE_TOTAL']} per family. This benefit applies only to married individuals with children under their sponsorship.",
         "ADU Tuition Waiver: 75% deduction on tuition fees for self, 50% for dependents and 25% for immediate family in accordance with ADU Policy. (applicable upon completion of one year of service with ADU)",
     ]
 
-    # Ensure header text is correct and insert lines after it
     header = doc.paragraphs[start]
-    _set_paragraph_text(header, "3. Benefits")
+    # Normalize header if doubled inside the same paragraph
+    _set_par_text(header, _dedup_in_paragraph(header.text).strip() or "3. Benefits")
     last = header
     for line in lines:
-        last = _insert_paragraph_after(last, line)
+        last = _insert_after(last, line)
 
 def replace_placeholders(doc: Document, mapping: dict):
-    # 1) Replace tokens everywhere (tolerant of run splits)
+    # 1) Replace tokens; strip any leftovers inline; de-dup within paragraph
     for p in doc.paragraphs:
-        _set_paragraph_text(p, _token_replace(p.text, mapping))
+        new = _token_replace(p.text, mapping)
+        new = _strip_tokens_inline(new)
+        new = _dedup_in_paragraph(new)
+        _set_par_text(p, new)
+
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    _set_paragraph_text(p, _token_replace(p.text, mapping))
+                    new = _token_replace(p.text, mapping)
+                    new = _strip_tokens_inline(new)
+                    new = _dedup_in_paragraph(new)
+                    _set_par_text(p, new)
 
-    # 2) Purge any paragraph that still contains a token -> kills green leftover lines
-    purge_placeholder_paragraphs(doc)
+    # 2) Remove standalone "Salutation Name" lines (e.g., "Dr. Dana" or with trailing comma)
+    sal = (mapping.get("SALUTATION","") + " " + mapping.get("CANDIDATE_NAME","")).strip()
+    sal_variants = {sal, sal + ","}
+    for p in list(doc.paragraphs):
+        if p.text.strip() in sal_variants:
+            p._element.getparent().remove(p._element)
 
-    # 3) Normalize header/intro/salary/probation/notice to single clean copies
-    normalize_header_intro_salary_terms(doc, mapping)
+    # 3) Keep only LAST copies of key policy paragraphs across the document
+    _keep_last_across_doc(doc)
 
-    # 4) Rebuild Benefits section cleanly from 7 values
+    # 4) Rebuild benefits body cleanly
     rebuild_benefits_section(doc, mapping)
 
 def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
@@ -224,7 +201,7 @@ def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
     replace_placeholders(doc, mapping)
     out = BytesIO(); doc.save(out); out.seek(0); return out.getvalue()
 
-# ========== UI ==========
+# ---------- UI ----------
 st.title("📄 ADU – Faculty Offer Letter Generator")
 
 with st.form("offer_form", clear_on_submit=False):
@@ -254,33 +231,26 @@ with st.form("offer_form", clear_on_submit=False):
     with c6:
         probation = st.number_input("Probation (months)", min_value=1, max_value=12, value=6)
 
-    uploaded_template = st.file_uploader("Upload custom DOCX (optional). Otherwise uses default.", type=["docx"])
+    uploaded_template = st.file_uploader("Upload custom DOCX template (optional)", type=["docx"])
     submit = st.form_submit_button("Generate Offer Letter")
 
 if submit:
     today = datetime.now().strftime(DATE_FORMAT)
 
-    # 13 direct-input placeholders
+    # 13 direct inputs
     base_map = {
-        "ID": candidate_id,
-        "DATE": today,
-        "SALUTATION": salutation,
-        "CANDIDATE_NAME": candidate_name,
-        "TELEPHONE": telephone,
-        "PERSONAL_EMAIL": personal_email,
-        "POSITION": position,
-        "DEPARTMENT": department,
-        "CAMPUS": campus,
+        "ID": candidate_id, "DATE": today,
+        "SALUTATION": salutation, "CANDIDATE_NAME": candidate_name,
+        "TELEPHONE": telephone, "PERSONAL_EMAIL": personal_email,
+        "POSITION": position, "DEPARTMENT": department, "CAMPUS": campus,
         "REPORTING_MANAGER": reporting_manager,
         "SALARY": f"{int(salary):,}" if salary else "",
         "PROBATION": probation,
     }
 
-    # 7 benefits placeholders
+    # 7 benefits
     benefits_map = compute_benefits_mapping(
-        rank=rank,
-        marital=marital_status,
-        campus=campus,
+        rank=rank, marital=marital_status, campus=campus,
         is_international=(hire_type == "International"),
     )
 
