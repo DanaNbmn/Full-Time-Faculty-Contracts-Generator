@@ -254,7 +254,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     add_heading(doc, "6. Documentation Requirements")
     for item in [
         "Ministry of Higher Education and Scientific Research (MOHESR) Clearance.",
-        "Completion of visa and ADU sponsorship formalities.",
+               "Completion of visa and ADU sponsorship formalities.",
         "Attestation of original academic qualifications.",
         "Medical examination and clearance.",
         "Notarized copies of marriage and birth certificates (if applicable).",
@@ -355,8 +355,24 @@ if submit:
     benefits = compute_benefits(rank, marital_status, campus, hire_type == "International")
     m = {**base, **benefits}
 
-    logo_bytes = logo_file.read() if logo_file else None
-    footer_bytes = footer_file.read() if footer_file else None
+    # --- Always use app-bundled images if nothing uploaded ---
+    try:
+        if logo_file:
+            logo_bytes = logo_file.read()
+        else:
+            with open(DEFAULT_HEADER_LOGO, "rb") as f:
+                logo_bytes = f.read()
+    except Exception:
+        logo_bytes = None  # fallback handled inside apply_header_footer
+
+    try:
+        if footer_file:
+            footer_bytes = footer_file.read()
+        else:
+            with open(DEFAULT_FOOTER_BANNER, "rb") as f:
+                footer_bytes = f.read()
+    except Exception:
+        footer_bytes = None  # fallback handled inside apply_header_footer
 
     try:
         docx_bytes = build_letter(m, logo_bytes=logo_bytes, footer_bytes=footer_bytes)
