@@ -1,196 +1,70 @@
-# app.py
-import streamlit as st
-from docx import Document
-from io import BytesIO
-from datetime import datetime
-
-st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
-
-# ========= 1) CONFIG =========
-DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders.docx"  # keep your file name here
-DATE_FORMAT = "%d %B %Y"  # e.g., 11 August 2025
-
-# ========= 2) BENEFITS RULES (from your table) =========
-BENEFITS = {
-    "_shared": {
-        "children_school_allowance": {"AD/Dubai": 60000, "AA": 50000},
-    },
-    "Professor": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
-        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
-        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
-        "repatriation_allowance": 3000,
-    },
-    "Associate / Sr. Lecturer": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
-        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
-        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
-        "repatriation_allowance": 3000,
-    },
-    "Assistant / Lecturer": {
-        "annual_leave_days": 56,
-        "joining_ticket_international": "1+1+2 Economy",
-        "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
-        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
-        "repatriation_allowance": 3000,
-    },
-    "Senior Instructor": {
-        "annual_leave_days": 42,
-        "joining_ticket_international": "1+1+2 Economy",
-        "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
-        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
-        "repatriation_allowance": 2000,
-    },
-    "Instructor": {
-        "annual_leave_days": 42,
-        "joining_ticket_international": "1+1+2 Economy",
-        "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
-        "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
-        "repatriation_allowance": 2000,
-    },
-}
-
-# ========= 3) HELPERS =========
-def campus_key(campus: str) -> str:
-    # Dubai follows Abu Dhabi rules
-    return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
-
-def fmt_amt(n: int) -> str:
-    return f"{int(n):,}"
-
-def compute_benefits_mapping(rank: str, marital: str, campus: str, is_international: bool):
-    R = BENEFITS[rank]
-    S = BENEFITS["_shared"]
-    ckey = campus_key(campus)
-
-    housing = R["housing_allowance_k"][ckey][marital] * 1000
-    furniture = R["furniture_allowance_k_once"][ckey][marital] * 1000
-    edu = S["children_school_allowance"][ckey]
-
-    # Commencement (joining) ticket only for international hires
-    joining_value = R["joining_ticket_international"] if is_international else ""
-
-    return {
-        # ONLY the placeholders you requested:
-        "HOUSING_ALLOWANCE": fmt_amt(housing),
-        "FURNITURE_ALLOWANCE": fmt_amt(furniture),
-        "JOINING_TICKET": joining_value,
-        "REPARIATION_ALLOWANCE": fmt_amt(R["repatriation_allowance"]),
-        "ANNUAL_LEAVE_DAYS": R["annual_leave_days"],
-        "EDUCATION_ALLOWANCE_PER_CHILD": fmt_amt(edu),
-        "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
-    }
-
 def replace_placeholders(doc: Document, mapping: dict):
-    def replace_in_paragraph(par):
+    """
+    1) Replace placeholders in all paragraphs/cells.
+    2) If JOINING_TICKET is empty, remove the 'Commencement Air Tickets:' paragraph.
+    3) De-duplicate lines that appear twice in the same paragraph (keep the last).
+    """
+    # Sentences we guard against being duplicated in a single paragraph
+    # (start anchors so we can cut the paragraph to the last occurrence)
+    DEDUP_STARTS = [
+        "Abu Dhabi University (ADU) is pleased",   # intro line
+        "Probation Period:",                        # probation line
+        "Accommodation:",
+        "Furniture Allowance:",
+        "Annual Leave Airfare:",
+        "Commencement Air Tickets:",
+        "Relocation Allowance:",
+        "Repatriation Air Tickets:",
+        "Repatriation Allowance:",
+        "Medical Insurance:",
+        "Annual Leave Entitlement:",
+        "School Fee Subsidy:",
+        "ADU Tuition Waiver:",
+    ]
+
+    def dedup_line(text: str) -> str:
+        # If a key phrase appears more than once, keep from its LAST occurrence onward
+        for start in DEDUP_STARTS:
+            idx = text.find(start)
+            if idx != -1:
+                last = text.rfind(start)
+                if last != idx:  # appears at least twice
+                    text = text[last:]
+        return text
+
+    def replace_and_clean(par):
         text = par.text
+
+        # 1) Replace placeholders
         for k, v in mapping.items():
             token = f"{{{{{k}}}}}"
             if token in text:
                 text = text.replace(token, str(v))
-        # rebuild runs to avoid leftover fragments
+
+        # 2) Remove the entire Commencement line if JOINING_TICKET is blank
+        if mapping.get("JOINING_TICKET", "") == "" and "Commencement Air Tickets:" in text:
+            text = ""  # clear this paragraph completely
+
+        # 3) De-duplicate if paragraph accidentally contains doubled content
+        text = dedup_line(text)
+
+        # Rebuild runs cleanly
         for _ in range(len(par.runs)):
             par.runs[0].text = ""
             del par.runs[0]
-        par.add_run(text)
+        if text:
+            par.add_run(text)
+        else:
+            # If empty, leave as empty paragraph (Word keeps structure ok)
+            par.add_run("")
 
+    # Apply to all paragraphs
     for p in doc.paragraphs:
-        replace_in_paragraph(p)
+        replace_and_clean(p)
+
+    # Apply to all table cells too (if any exist)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    replace_in_paragraph(p)
-
-def generate_docx(template_bytes: bytes | None, mapping: dict) -> bytes:
-    doc = Document(BytesIO(template_bytes)) if template_bytes else Document(DEFAULT_TEMPLATE_PATH)
-    replace_placeholders(doc, mapping)
-    out = BytesIO()
-    doc.save(out)
-    out.seek(0)
-    return out.getvalue()
-
-# ========= 4) UI =========
-st.title("📄 ADU – Faculty Offer Letter Generator")
-
-with st.form("offer_form", clear_on_submit=False):
-    st.subheader("Candidate & Position")
-    c1, c2 = st.columns(2)
-    with c1:
-        candidate_id = st.text_input("ID (Ref)", placeholder="TEG/2025/001")
-        salutation = st.selectbox("Salutation", ["Dr.", "Mr.", "Ms.", "Prof.", "Eng."], index=0)
-        candidate_name = st.text_input("Candidate Name", placeholder="Full Name")
-        telephone = st.text_input("Telephone", placeholder="+971-XX-XXX-XXXX")
-        personal_email = st.text_input("Personal Email", placeholder="name@example.com")
-    with c2:
-        position = st.text_input("Position Title", placeholder="Assistant Professor in ...")
-        department = st.text_input("College/Department Name", placeholder="College/Department")
-        reporting_manager = st.text_input("Reporting Manager’s Title", placeholder="Dean/Chair of ...")
-        campus = st.selectbox("Campus", ["Abu Dhabi", "Dubai", "Al Ain"], index=0)
-        salary = st.number_input("Total Monthly Compensation (AED)", min_value=0, step=500, value=0)
-
-    st.subheader("Contract Settings")
-    c3, c4, c5, c6 = st.columns(4)
-    with c3:
-        rank = st.selectbox("Rank", [k for k in BENEFITS.keys() if k != "_shared"], index=2)  # default Assistant / Lecturer
-    with c4:
-        marital_status = st.selectbox("Marital Status", ["Single", "Married"], index=0)
-    with c5:
-        hire_type = st.selectbox("Hire Type", ["Local", "International"], index=0)
-    with c6:
-        probation = st.number_input("Probation (months)", min_value=1, max_value=12, value=6, step=1)
-
-    st.divider()
-    uploaded_template = st.file_uploader("Upload a custom DOCX template (optional). Leave empty to use the default.", type=["docx"])
-
-    submit = st.form_submit_button("Generate Offer Letter")
-
-if submit:
-    today = datetime.now().strftime(DATE_FORMAT)
-    # Only the placeholders you listed as direct inputs:
-    base_map = {
-        "ID": candidate_id,
-        "DATE": today,
-        "SALUTATION": salutation,
-        "CANDIDATE_NAME": candidate_name,
-        "TELEPHONE": telephone,
-        "PERSONAL_EMAIL": personal_email,
-        "POSITION": position,
-        "DEPARTMENT": department,
-        "CAMPUS": campus,  # single source of truth
-        "REPORTING_MANAGER": reporting_manager,
-        "SALARY": f"{int(salary):,}" if salary else "",
-        "PROBATION": probation,
-    }
-
-    # Only the 7 benefit mappings you approved:
-    benefits_map = compute_benefits_mapping(
-        rank=rank,
-        marital=marital_status,
-        campus=campus,
-        is_international=(hire_type == "International"),
-    )
-
-    mapping = {**base_map, **benefits_map}
-
-    # Basic validation
-    required = ["ID", "CANDIDATE_NAME", "PERSONAL_EMAIL", "POSITION", "DEPARTMENT", "REPORTING_MANAGER", "SALARY"]
-    missing = [k for k in required if not mapping.get(k)]
-    if missing:
-        st.warning("Please complete required fields: " + ", ".join(missing))
-
-    try:
-        tpl_bytes = uploaded_template.read() if uploaded_template else None
-        docx_bytes = generate_docx(tpl_bytes, mapping)
-        st.success("Offer letter generated successfully.")
-        st.download_button(
-            "⬇️ Download Offer Letter (DOCX)",
-            data=docx_bytes,
-            file_name=f"Offer_{(candidate_name or 'Candidate').replace(' ', '_')}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
-    except Exception as e:
-        st.error(f"Generation failed: {e}")
+                    replace_and_clean(p)
