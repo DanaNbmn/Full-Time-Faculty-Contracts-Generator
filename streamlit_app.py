@@ -142,7 +142,7 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         try:
             frun = fp.add_run()
             if footer_bytes:
-                frun.add_picture(BytesIO(footer_bytes), width=Inches(8.51), height=Inches(0.57))
+                frun.add_picture(BytesIO(footer_bytes), width=Inches(10.51), height=Inches(0.57))
         except Exception:
             pass
 
@@ -364,4 +364,5 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
 
