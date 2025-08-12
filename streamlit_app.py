@@ -53,6 +53,7 @@ BENEFITS = {
 
 # ========= 3) HELPERS =========
 def campus_key(campus: str) -> str:
+    # Dubai follows Abu Dhabi rules
     return "AD/Dubai" if campus in ["Abu Dhabi", "Dubai", "AD/Dubai"] else "AA"
 
 def fmt_amt(n: int) -> str:
@@ -66,8 +67,10 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
     housing = R["housing_allowance_k"][ckey][marital] * 1000
     furniture = R["furniture_allowance_k_once"][ckey][marital] * 1000
 
-    joining_line = R["joining_ticket_international"] if is_international else "Not applicable for local hires"
-    # Education allowance: if your policy uses different per-child vs family-cap numbers, change here.
+    # Commencement (joining) ticket only for international hires
+    joining_line = R["joining_ticket_international"] if is_international else ""
+
+    # Education allowance (per-child and family cap — same figure per your table)
     edu_per_child = S["children_school_allowance"][ckey]
     edu_total = S["children_school_allowance"][ckey]
 
@@ -83,20 +86,20 @@ def compute_benefits_mapping(rank: str, marital: str, campus: str, is_internatio
         "ANNUAL_TICKET": S["annual_ticket"],
         "RELOCATION_ALLOWANCE": fmt_amt(R["relocation_allowance"]),
         "REPARIATION_ALLOWANCE": fmt_amt(R["repatriation_allowance"]),
-        "REPATRIATION_TICKET": S["repatriation_ticket"],
-        "HEALTH_INSURANCE": S["health_insurance"],
+        "REPATRIATION_TICKET": S["repatriation_ticket"],   # always applies
+        "HEALTH_INSURANCE": S["health_insurance"],         # always applies
         "ANNUAL_LEAVE_DAYS": R["annual_leave_days"],
-        "CAMPUS": "Abu Dhabi/Dubai" if ckey == "AD/Dubai" else "Al Ain",
+        # IMPORTANT: do NOT set "CAMPUS" here; keep the user's {{CAMPUS}} from base_map
     }
 
 def replace_placeholders(doc: Document, mapping: dict):
+    # Replace text in paragraphs and tables; rebuild runs to avoid partial leftovers
     def replace_in_paragraph(par):
         text = par.text
         for k, v in mapping.items():
             token = f"{{{{{k}}}}}"
             if token in text:
                 text = text.replace(token, str(v))
-        # rebuild runs to avoid partial formatting artifacts
         for _ in range(len(par.runs)):
             par.runs[0].text = ""
             del par.runs[0]
@@ -134,7 +137,7 @@ with st.form("offer_form", clear_on_submit=False):
         position = st.text_input("Position Title", placeholder="Assistant Professor in ...")
         department = st.text_input("College/Department Name", placeholder="College/Department")
         reporting_manager = st.text_input("Reporting Manager’s Title", placeholder="Dean/Chair of ...")
-        campus = st.selectbox("Campus", ["Abu Dhabi", "Al Ain"], index=0)
+        campus = st.selectbox("Campus", ["Abu Dhabi", "Dubai", "Al Ain"], index=0)  # ← add Dubai
         salary = st.number_input("Total Monthly Compensation (AED)", min_value=0, step=500, value=0)
 
     st.subheader("Contract Settings")
@@ -166,7 +169,7 @@ if submit:
         "POSITION": position,
         "DEPARTMENT": department,
         "REPORTING_MANAGER": reporting_manager,
-        "CAMPUS": campus,  # Also overridden in benefits mapping as label if needed
+        "CAMPUS": campus,  # single source of truth for campus label
         "SALARY": f"{int(salary):,}" if salary else "",
         "PROBATION": probation,
     }
@@ -193,7 +196,7 @@ if submit:
         st.download_button(
             "⬇️ Download Offer Letter (DOCX)",
             data=docx_bytes,
-            file_name=f"Offer_{candidate_name.replace(' ', '_') or 'Candidate'}.docx",
+            file_name=f"Offer_{(candidate_name or 'Candidate').replace(' ', '_')}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         st.info(f"Applied rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
