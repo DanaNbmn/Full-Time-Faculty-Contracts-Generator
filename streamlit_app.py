@@ -10,49 +10,44 @@ st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄"
 
 DATE_FORMAT = "%d %B %Y"
 
-# Optional fallback filenames if you don't upload images in the app
-DEFAULT_HEADER_LOGO = "adu_logo.png"
-DEFAULT_FOOTER_BANNER = "adu_footer.png"
+# Fallback filenames if you don't upload images
+DEFAULT_HEADER_LOGO = "adu_logo.png"     # header logo image
+DEFAULT_FOOTER_BANNER = "adu_footer.png" # footer banner image
 
-# ---------------- Benefits (7 fields only) ----------------
+# ==== Your benefits table (unchanged) ====
 BENEFITS = {
     "_shared": {"children_school_allowance": {"AD/Dubai": 60000, "AA": 50000}},
     "Professor": {
         "annual_leave_days": 56,
-        "joining_ticket_international":
-            "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
+        "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Associate / Sr. Lecturer": {
         "annual_leave_days": 56,
-        "joining_ticket_international":
-            "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
+        "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Assistant / Lecturer": {
         "annual_leave_days": 56,
-        "joining_ticket_international":
-            "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
+        "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 45, "Married": 60}, "AA": {"Single": 35, "Married": 45}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 20, "Married": 30}, "AA": {"Single": 20, "Married": 30}},
         "repatriation_allowance": 3000,
     },
     "Senior Instructor": {
         "annual_leave_days": 42,
-        "joining_ticket_international":
-            "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
+        "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
     },
     "Instructor": {
         "annual_leave_days": 42,
-        "joining_ticket_international":
-            "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
+        "joining_ticket_international": "Economy class air tickets for yourself, your spouse, and up to two (2) eligible dependent children under the age of 21 years residing in the UAE, provided upon commencement of employment.",
         "housing_allowance_k": {"AD/Dubai": {"Single": 35, "Married": 45}, "AA": {"Single": 30, "Married": 40}},
         "furniture_allowance_k_once": {"AD/Dubai": {"Single": 12, "Married": 15}, "AA": {"Single": 12, "Married": 15}},
         "repatriation_allowance": 2000,
@@ -80,7 +75,7 @@ def compute_benefits(rank: str, marital: str, campus: str, is_international: boo
         "EDUCATION_ALLOWANCE_TOTAL": fmt_amt(edu),
     }
 
-# ---------------- Document builder (no template) ----------------
+# ---------- helpers ----------
 def add_heading(doc, text):
     p = doc.add_paragraph()
     run = p.add_run(text)
@@ -91,27 +86,29 @@ def add_heading(doc, text):
 def add_bullet(doc, text):
     doc.add_paragraph(text, style="List Bullet")
 
-# Bold any subtitle (prefix before first colon)
 def bold_prefix_before_colon(paragraph):
+    """Make the text before the first colon bold (keeps everything else)."""
     txt = paragraph.text
     if ":" not in txt:
         return
     prefix, rest = txt.split(":", 1)
     prefix += ":"
+    # clear runs
     for _ in range(len(paragraph.runs)):
         paragraph.runs[0].text = ""
         del paragraph.runs[0]
-    r1 = paragraph.add_run(prefix)
-    r1.bold = True
-    r1.font.size = Pt(11)
+    r1 = paragraph.add_run(prefix); r1.bold = True; r1.font.size = Pt(11)
     paragraph.add_run(rest)
 
-# Header (centered logo) & Footer (full-width banner) using uploaded files
 def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: bytes | None):
-    for section in doc.sections:
-        usable_width = section.page_width - section.left_margin - section.right_margin
+    """Insert images with EXACT sizes and set header/footer distances."""
 
-        # Header
+    for section in doc.sections:
+        # Set distances as requested
+        section.header_distance = Inches(0.5)  # header from top
+        section.footer_distance = Inches(0.5)  # footer from bottom
+
+        # ----- Header (centered) -----
         header = section.header
         if not header.paragraphs:
             header.add_paragraph()
@@ -119,17 +116,18 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
         try: hp.clear()
         except Exception: pass
+
         try:
             run = hp.add_run()
             if logo_bytes:
-                run.add_picture(BytesIO(logo_bytes))  # natural size
+                run.add_picture(BytesIO(logo_bytes), width=Inches(2.0), height=Inches(1.5))
             else:
-                # fallback to file if exists locally
-                run.add_picture(DEFAULT_HEADER_LOGO)
+                run.add_picture(DEFAULT_HEADER_LOGO, width=Inches(2.0), height=Inches(1.5))
         except Exception:
-            pass  # silently continue if file not found
+            # If file missing, leave header blank (no crash)
+            pass
 
-        # Footer
+        # ----- Footer (centered) -----
         footer = section.footer
         if not footer.paragraphs:
             footer.add_paragraph()
@@ -137,12 +135,13 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
         fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
         try: fp.clear()
         except Exception: pass
+
         try:
             frun = fp.add_run()
             if footer_bytes:
-                frun.add_picture(BytesIO(footer_bytes), width=usable_width)
+                frun.add_picture(BytesIO(footer_bytes), width=Inches(8.51), height=Inches(0.57))
             else:
-                frun.add_picture(DEFAULT_FOOTER_BANNER, width=usable_width)
+                frun.add_picture(DEFAULT_FOOTER_BANNER, width=Inches(8.51), height=Inches(0.57))
         except Exception:
             pass
 
@@ -182,7 +181,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     add_bullet(doc, "Other Allowance: 50% of the total monthly compensation.")
     doc.add_paragraph("Payment will be made at the end of each calendar month.")
 
-    # 2. Terms
+    # 2. Terms and Conditions
     add_heading(doc, "2. Terms and Conditions")
     doc.add_paragraph(f"Probation Period: The first {m['PROBATION']} months from the start date shall constitute the probationary period.")
     doc.add_paragraph(
@@ -235,7 +234,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
         "(applicable upon completion of one year of service with ADU)"
     )
 
-    # 4. End of Service
+    # 4. End of Service Entitlements
     add_heading(doc, "4. End of Service Entitlements")
     doc.add_paragraph(
         "End of Service Gratuity: Calculated at one (1) month’s basic salary for each completed year of service, "
@@ -243,7 +242,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
         "No gratuity is payable for service of less than one (1) year."
     )
 
-    # 5. Additional
+    # 5. Additional Provisions
     add_heading(doc, "5. Additional Provisions")
     doc.add_paragraph(
         "a) If married, any benefits provided by the spouse’s employer will not be duplicated by ADU. You are required to declare to TEG any benefits "
@@ -251,7 +250,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     )
     doc.add_paragraph("b) You may be requested to teach in other ADU campuses as required by the college.")
 
-    # 6. Documentation
+    # 6. Documentation Requirements
     add_heading(doc, "6. Documentation Requirements")
     for item in [
         "Ministry of Higher Education and Scientific Research (MOHESR) Clearance.",
@@ -272,9 +271,7 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
 
     # 7. Validity
     add_heading(doc, "7. Validity")
-    doc.add_paragraph(
-        "Your acceptance of this offer must be received within ten (10) working days from the date of this letter."
-    )
+    doc.add_paragraph("Your acceptance of this offer must be received within ten (10) working days from the date of this letter.")
     doc.add_paragraph(
         "This offer, once signed, constitutes an official agreement between Abu Dhabi University and yourself. Your signature on this document indicates your agreement "
         "with the included terms and conditions of employment and supersedes all other written and/or verbal agreements, understandings, and offers."
@@ -284,23 +281,23 @@ def build_letter(m, logo_bytes=None, footer_bytes=None):
     doc.add_paragraph("Prof. Hamad Ebrahim Ali Odhabi")
     doc.add_paragraph("Vice Chancellor for AI and Operational Excellence")
 
-    doc.add_paragraph("")  # spacer
+    doc.add_paragraph("")
     add_heading(doc, "Acknowledgment and Acceptance")
     doc.add_paragraph("I accept this offer of employment and agree to sign the Ministry of Labour Contract upon joining ADU.")
     doc.add_paragraph(f"Name (print): {m['SALUTATION']} {m['CANDIDATE_NAME']}")
     doc.add_paragraph("Signature: _______________________________")
     doc.add_paragraph("Date: ___________________________________")
 
-    # Fonts
+    # Normalize fonts
     style = doc.styles["Normal"]
     style.font.name = "Times New Roman"
     style._element.rPr.rFonts.set(qn("w:eastAsia"), "Times New Roman")
     style.font.size = Pt(11)
 
-    # Header/Footer from uploads (or fallbacks)
+    # Apply header & footer with exact sizes
     apply_header_footer(doc, logo_bytes, footer_bytes)
 
-    # Make every subtitle bold (prefix before first colon)
+    # Bold all subtitles (prefix before first ":")
     for par in doc.paragraphs:
         bold_prefix_before_colon(par)
 
@@ -314,9 +311,9 @@ with st.form("offer_form", clear_on_submit=False):
     st.subheader("Branding (optional uploads)")
     c0, c00 = st.columns(2)
     with c0:
-        logo_file = st.file_uploader("Header logo (PNG/JPG)", type=["png", "jpg", "jpeg"])
+        logo_file = st.file_uploader("Header logo (PNG/JPG) – 2.0\" × 1.5\"", type=["png", "jpg", "jpeg"])
     with c00:
-        footer_file = st.file_uploader("Footer banner (PNG/JPG)", type=["png", "jpg", "jpeg"])
+        footer_file = st.file_uploader("Footer banner (PNG/JPG) – 8.51\" × 0.57\"", type=["png", "jpg", "jpeg"])
 
     st.subheader("Candidate & Position")
     c1, c2 = st.columns(2)
@@ -355,7 +352,6 @@ if submit:
         "DEPARTMENT": department, "CAMPUS": campus, "REPORTING_MANAGER": reporting_manager,
         "SALARY": f"{int(salary):,}" if salary else "", "PROBATION": probation,
     }
-
     benefits = compute_benefits(rank, marital_status, campus, hire_type == "International")
     m = {**base, **benefits}
 
