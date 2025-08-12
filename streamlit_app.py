@@ -152,11 +152,6 @@ def apply_header_footer(doc: Document, logo_bytes: bytes | None, footer_bytes: b
 def build_letter(m, logo_bytes=None, footer_bytes=None):
     doc = Document()
 
-    # Title
-    p = doc.add_paragraph("Abu Dhabi University Offer Letter")
-    p.runs[0].bold = True
-    p.runs[0].font.size = Pt(11)
-
     doc.add_paragraph(f"Ref: {m['ID']}")
     doc.add_paragraph(f"Date: {m['DATE']}")
     doc.add_paragraph("")
@@ -370,3 +365,4 @@ if submit:
         st.info(f"Rank: {rank} | Marital: {marital_status} | Campus: {campus} | Hire: {hire_type}")
     except Exception as e:
         st.error(f"Generation failed: {e}")
+
