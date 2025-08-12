@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="ADU Faculty Contract Generator", page_icon="📄", layout="centered")
 
 # ========= 1) CONFIG =========
-DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders.docx"
+DEFAULT_TEMPLATE_PATH = "Faculty_Offer_Letter_Template_Placeholders_Cleaned.docx"
 DATE_FORMAT = "%d %B %Y"  # e.g., 11 August 2025
 
 # ========= 2) BENEFITS RULES (from your table) =========
@@ -204,3 +204,4 @@ if submit:
         st.error(f"Generation failed: {e}")
 
 st.caption("Tip: Keep fonts, alignment, and logo in the Word template styles for a perfectly formatted output.")
+
